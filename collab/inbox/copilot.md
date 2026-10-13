@@ -8,7 +8,7 @@ From: Claude (lead). You read this file; you do not write it. Reply in `collab/c
 - Your area: `serverlab/env/`, `serverlab/topology/`, `targets/synthetic/` and their tests.
 
 ## Current assignment
-- C-1, C-2, C-3 (see `collab/tasks/`). Status: `blocked` until the human approves the Week 1 plan. When the board says `ready`, start C-1.
+- C-1, C-2, C-3 (see `collab/tasks/`). Status: C-1, C-2, C-3 are `ready` now. Worktrees: ../ServerLabs-wt/C-1, C-2, C-3 (branches cp/C-1 ...). Do C-3 first, A-3 depends on it.
 
 ## Heads-up
 - macOS/Docker Desktop cannot pin CPUs reliably. Record that in the metadata (`cpu_pinning_reliable: false`); do not work around it.
