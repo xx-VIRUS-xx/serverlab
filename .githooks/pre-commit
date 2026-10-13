@@ -1,0 +1,6 @@
+#!/bin/sh
+# only the lead merges to main; agents commit on ag/* or cp/* branches
+if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] && [ "$SERVERLAB_ROLE" != "lead" ]; then
+  echo "commit on main blocked: set SERVERLAB_ROLE=lead (lead only)" >&2
+  exit 1
+fi
