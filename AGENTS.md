@@ -12,7 +12,8 @@ Read in this order before doing anything: `plan.md` -> `agent-prompt.md` -> `COL
 4. **Locked decisions (`plan.md` s3) are not yours to change.** Disagree with evidence in `collab/channel.md`, then wait.
 5. **No fabricated numbers**, no expected results in code or docs. No custom load generator. Open-loop k6 only.
 6. **Do not guess.** If the spec is ambiguous, post a `question` in the channel and work on something else. Claude answers.
-7. Python 3.12, uv, typer, pydantic v2, pytest, type hints, ruff + mypy clean. Run tests before marking `review`.
+7. **No attribution in commits.** No `Co-Authored-By`, "Generated with" or tool/agent names as contributors. Run `git config core.hooksPath .githooks` once per clone/worktree (the hook rejects such messages). Commits on `main` are blocked for everyone but the lead.
+8. Python 3.12, uv, typer, pydantic v2, pytest, type hints, ruff + mypy clean. Run tests before marking `review`.
 
 ## Definition of "ready for review"
 

@@ -86,6 +86,15 @@ Order: L-2 first (unblocks all) -> C-1/C-2/C-3/A-1 in parallel -> A-2, A-3 -> L-
 5. **HDR range/precision:** 1 us to 60 s with 3 significant digits acceptable?
 6. **Agents:** confirm Antigravity and Copilot can each be pointed at this repo directory and are allowed to run shell commands (tests, k6, docker). If either can only edit files, I will shift execution-heavy tasks to myself.
 
+## 8a. Answers (decided by lead, delegated by owner)
+
+1. Tooling: installed `k6` 2.3.0 and `uv` 0.13.0 via brew; Docker present (VM: 4 CPUs, ~8 GB).
+2. No Linux host yet. Week 1 is dev-only, tagged `not-cross-machine-comparable`. Dev split inside the 4-CPU VM: SUT cpus 0-1, k6 cpu 2, cpu 3 spare. Canonical host sizing decided before Week 4.
+3. Raw per-request k6 output: delete after the HDR is built; `keep_raw: true` in the spec retains it gzipped.
+4. Git initialised, `main` protected by a local hook (lead only), `results/` ignored. Commits carry no co-author or tool-attribution trailers; a `commit-msg` hook rejects them. Applies to all three agents.
+5. HDR: 1 us to 60 s, 3 significant digits.
+6. Agent shell access cannot be verified from here. Assumed yes; if an agent reports otherwise it posts a `blocker` and I reassign.
+
 ## 9. Deviations
 
 (none yet)
