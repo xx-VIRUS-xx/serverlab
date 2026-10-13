@@ -15,6 +15,16 @@ Read in this order before doing anything: `plan.md` -> `agent-prompt.md` -> `COL
 7. **No attribution in commits.** No `Co-Authored-By`, "Generated with" or tool/agent names as contributors. Run `git config core.hooksPath .githooks` once per clone/worktree (the hook rejects such messages). Commits on `main` are blocked for everyone but the lead.
 8. Python 3.12, uv, typer, pydantic v2, pytest, type hints, ruff + mypy clean. Run tests before marking `review`.
 
+## Where to read and write coordination files
+
+Worktrees have their own copies of `collab/`, which go stale. The single live copy is in the main checkout:
+
+`<repo>/collab/`
+
+- **Append to** `<repo>/collab/channel.md` (the only file you write there). Never use the worktree copy.
+- **Read** the board and your inbox from that same directory.
+- Set your task status (`in-progress`, `review`) in your own worktree's `collab/tasks/<ID>.md` and commit it on your branch. The lead's watcher sees it.
+
 ## Definition of "ready for review"
 
 - Acceptance checks in the task file all ticked, with real command output pasted under `## Evidence`.
