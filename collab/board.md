@@ -26,4 +26,4 @@ Task detail: `collab/tasks/<ID>.md`.
 | L-9 | Week 3: knee finder (pure) | claude | merged | week3 plan approved | main |
 | C-5 | Week 3: synthetic keep-alive + measured throughput ceiling | haiku-worker | merged | week3 plan approved | cp/C-5 |
 | A-5 | Week 3: coarse + bracket sweep driver | haiku-worker | merged | L-9 | ag/A-5 |
-| L-10 | Week 3: sweep/validate CLI, k6 cgroup CPU | claude | blocked | L-8, L-9, C-5, A-5 | main |
+| L-10 | Week 3: sweep/validate CLI, k6 cgroup CPU | claude | merged | L-8, L-9, C-5, A-5 | main |

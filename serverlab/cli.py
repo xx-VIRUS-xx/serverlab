@@ -153,7 +153,7 @@ def validate(
     if failed:
         typer.echo(f"VALIDATION FAILED: {len(failed)} check(s)", err=True)
         raise typer.Exit(EXIT_INVALID_RUN)
-    typer.echo("offline validation passed")
+    typer.echo("offline validation passed" if offline else "validation passed")
 
 
 @app.command()

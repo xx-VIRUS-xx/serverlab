@@ -1,6 +1,6 @@
 # Week 3 phase plan: statistics, knee finder, tool validation
 
-Status: **Approved 2026-10-14 with the defaults in section 9. In progress.**
+Status: **Approved 2026-10-14 with the defaults in section 9. Implemented and merged; results in section 11.**
 Source: `plan.md` s6 Week 3; locked decisions s3.6 (HDR merge, never average P99), s3.7 (bootstrap CIs), s3.8 (sweep strategy), s3.9 (knee = curve analysis, USL descriptive only), s3.12 (validate the tool before any experiment).
 
 ## 1. Scope
@@ -82,7 +82,28 @@ If check 2 fails, the finding is reported as a tool defect with data. Thresholds
 5. Add numpy as a runtime dependency and scipy as dev-only? Default yes.
 
 ## 10. Deviations
-(none yet)
+- The sweep driver, knee finder, stats and `serverlab sweep`/`validate` are as planned. Added: per-run k6 container CPU and wall time (`RunResult.k6_cpu_usec`, `k6_wall_s`), recorded from the container's own cgroup via an `sh` wrapper around k6.
+- **Measurement bug found by a plumbing run and fixed before validation:** k6 CPU % was first computed over the nominal step duration; past saturation k6 drains VUs for up to 30 s, giving impossible values (450% of one CPU) that wrongly excluded saturated steps. It now uses the k6 container's real wall time. No threshold or definition changed.
+- One reduced-range `serverlab sweep` (`experiments/sweep_smoke.yaml`, one condition) was run twice for plumbing before the validation. It is not part of the validation evidence.
+- Normal and lognormal coverage rows are the same experiment for a median CI (the interval depends only on ranks, which `exp` preserves). They are listed separately but are not independent evidence.
 
 ## 11. Evidence
-(filled after implementation)
+Dev Mac, Docker Desktop VM (SUT cpus 0-1, k6 cpu 2), `not-cross-machine-comparable`. Thresholds from `docs/predictions.md`, committed before the run, unchanged.
+
+`uv run serverlab validate` -> exit 0 (results: `results/validate_synthetic/20261014T165923Z`, 36 sweep steps, 0 excluded):
+
+| Target | C (req/s) | Bracket | Point estimate | Error | Steps |
+|---|---|---|---|---|---|
+| s50  | 50  | [48, 50]   | 49.0  | -2.0% | 12 |
+| s100 | 100 | [97, 100]  | 98.5  | -1.5% | 12 |
+| s200 | 200 | [194, 201] | 197.5 | -1.3% | 12 |
+
+- Rule 1 (within 10%): PASS for all three. Rule 2 (bracket contains C): 3 of 3.
+- CI coverage (95% percentile bootstrap, 2000 trials x 10 000 resamples, MC s.e. ~0.005): n=10: 0.945, n=20: 0.937 (both PASS); n=5: 0.930 (reported only). Coverage is slightly below nominal, as expected for a percentile bootstrap at small n.
+
+What this does and does not show:
+- The estimates are all 1.3-2.0% **below** C, consistently. At an offered rate equal to C the queue already builds (P99 of 260-297 ms vs ~105 ms baseline), so the criterion marks that step bad. For s50 and s100 the bracket contains C only at its upper edge (hi == C). This is a small systematic bias of the definition, not noise.
+- This validates the tool against a deterministic target on one dev host. A real system with jitter and a noisy knee is harder; nothing here is a performance claim.
+- The baseline is the P99 of the single lowest-rate step; in s100 that step read 122.7 ms against ~105-112 ms elsewhere, which loosened its threshold to ~245 ms. It did not change any verdict here (rate 100 read 279.8 ms), but a noisy baseline is a real risk. Not changed after seeing the data (pre-registration); logged in `docs/backlog.md` for a decision with more data.
+- Runtime: about 15 minutes for the full `validate`; `--offline` about 30 s.
+- `ruff`, `mypy` clean; 192 tests pass.
