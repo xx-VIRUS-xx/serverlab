@@ -34,6 +34,7 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
+explicit_package_bases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
