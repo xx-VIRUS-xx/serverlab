@@ -1,6 +1,6 @@
 # Week 3 phase plan: statistics, knee finder, tool validation
 
-Status: **DRAFT, awaiting human approval. No Week 3 code exists.**
+Status: **Approved 2026-10-14 with the defaults in section 9. In progress.**
 Source: `plan.md` s6 Week 3; locked decisions s3.6 (HDR merge, never average P99), s3.7 (bootstrap CIs), s3.8 (sweep strategy), s3.9 (knee = curve analysis, USL descriptive only), s3.12 (validate the tool before any experiment).
 
 ## 1. Scope
