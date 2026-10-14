@@ -434,3 +434,81 @@ def test_adapter_live_run(tmp_path: Path) -> None:
         assert (tmp_path / "run_live.js").is_file()
     finally:
         server.shutdown()
+
+MISSING_P99_FIXTURE = """
+{
+  "metrics": {
+    "iterations": {"count": 5, "rate": 5.0},
+    "http_req_duration": {
+      "med": 10.0,
+      "p(90)": 20.0,
+      "max": 30.0
+    },
+    "http_req_failed": {"value": 0.0},
+    "vus": {"value": 1, "min": 1, "max": 2},
+    "vus_max": {"value": 3, "min": 3, "max": 3}
+  },
+  "root_group": {"name": "", "path": "", "id": "", "groups": {}, "checks": {}}
+}
+"""
+
+
+def test_missing_percentile_key_marks_run_invalid() -> None:
+    """If p(99) is absent from http_req_duration, run is invalid with a specific reason."""
+    result = parse_k6_summary(MISSING_P99_FIXTURE, planned=5, max_vus=10, run_id="run_missing_p99")
+
+    assert result.valid is False
+    latency_reasons = [r for r in result.invalid_reasons if "http_req_duration missing" in r]
+    assert len(latency_reasons) == 1
+    assert "p(99)" in latency_reasons[0]
+    assert "no percentile fallbacks applied" in latency_reasons[0]
+
+    # Placeholders are zeros
+    assert result.latency_ms.p99 == 0.0
+    assert result.latency_ms.p50 == 0.0
+
+
+def test_stale_summary_deleted_before_run(tmp_path: Path) -> None:
+    """K6Adapter must delete any pre-existing summary before launching k6.
+
+    Write a stale sentinel JSON with completed=999.  Run k6 against a live
+    server so it writes a fresh summary with a real (small) completed count.
+    The returned result must NOT reflect the stale count, proving the adapter
+    deleted the old file before k6 ran.
+    """
+
+    class QuickHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), QuickHandler)
+    port = server.server_address[1]
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        stale = tmp_path / "run_stale.json"
+        stale.write_text('{"metrics": {"iterations": {"count": 999}}}', encoding="utf-8")
+
+        adapter = K6Adapter()
+        spec = LoadSpec(
+            rate=2,
+            duration_s=1,
+            pre_allocated_vus=1,
+            max_vus=5,
+            url=f"http://127.0.0.1:{port}/",
+        )
+        result = adapter.run(spec, out_dir=tmp_path, run_id="run_stale")
+
+        # If the stale file had been parsed instead of deleted, completed == 999.
+        # k6 writes far fewer completions for a 1-second 2 rps run.
+        assert result.completed != 999, "stale summary was parsed instead of deleted"
+        assert result.summary_path.is_file(), "summary should exist after successful run"
+    finally:
+        server.shutdown()

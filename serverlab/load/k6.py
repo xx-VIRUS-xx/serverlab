@@ -116,7 +116,12 @@ def parse_k6_summary(
     run_id: str = "run",
     summary_path: Path | None = None,
 ) -> RunResult:
-    """Parse k6 summary-export JSON into RunResult and evaluate run validity."""
+    """Parse k6 summary-export JSON into RunResult and evaluate run validity.
+
+    Missing required percentile keys (med, p(90), p(99), max) in http_req_duration
+    cause the run to be marked invalid with a specific reason; zeros are used as
+    placeholders only in that case.  No fallback to avg or p(95).
+    """
     if isinstance(summary_data, Path):
         summary_path = summary_path or summary_data
         with open(summary_data, encoding="utf-8") as f:
@@ -144,26 +149,37 @@ def parse_k6_summary(
         effective_planned = int(planned) if planned is not None else (completed + dropped)
         effective_max_vus = max_vus
 
-    # Peak VUs: active vs allocated
+    # Peak VUs: derive only from vus_max / vus; never invent a value.
     vus_metric = metrics.get("vus", {})
     vus_max_metric = metrics.get("vus_max", {})
     peak_active = int(vus_metric.get("max", vus_metric.get("value", 0)))
     peak_allocated = int(vus_max_metric.get("max", vus_max_metric.get("value", 0)))
-    if peak_active == 0 and completed > 0:
-        peak_active = 1
+    peak_vus = max(peak_active, peak_allocated)
 
-    if spec is not None and spec.pre_allocated_vus >= spec.max_vus:
-        peak_vus = peak_active
-    else:
-        peak_vus = max(peak_active, peak_allocated)
-
-    # Latency percentiles in milliseconds
+    # Latency percentiles in milliseconds.
+    # Required keys: med, p(90), p(99), max.  No fallback to avg or p(95).
     dur = metrics.get("http_req_duration", {})
-    p50 = float(dur.get("med", dur.get("p(50)", dur.get("p(50.0)", dur.get("avg", 0.0)))))
-    p90 = float(dur.get("p(90)", dur.get("p(90.0)", 0.0)))
-    p99 = float(dur.get("p(99)", dur.get("p(99.0)", dur.get("p(95)", dur.get("max", 0.0)))))
-    max_val = float(dur.get("max", 0.0))
-    latency_ms = LatencyMs(p50=p50, p90=p90, p99=p99, max=max_val)
+    missing_keys: list[str] = []
+    for key in ("med", "p(90)", "p(99)", "max"):
+        if key not in dur:
+            missing_keys.append(key)
+
+    if missing_keys:
+        latency_ms = LatencyMs(p50=0.0, p90=0.0, p99=0.0, max=0.0)
+        missing_str = ", ".join(missing_keys)
+        valid_latency = False
+        missing_reason = (
+            f"http_req_duration missing required key(s) [{missing_str}]; "
+            f"run is invalid — no percentile fallbacks applied"
+        )
+    else:
+        p50 = float(dur["med"])
+        p90 = float(dur["p(90)"])
+        p99 = float(dur["p(99)"])
+        max_val = float(dur["max"])
+        latency_ms = LatencyMs(p50=p50, p90=p90, p99=p99, max=max_val)
+        valid_latency = True
+        missing_reason = ""
 
     # Error rate
     failed_metric = metrics.get("http_req_failed", {})
@@ -180,6 +196,10 @@ def parse_k6_summary(
         peak_vus=peak_vus,
         max_vus=effective_max_vus,
     )
+
+    if not valid_latency:
+        valid = False
+        invalid_reasons.insert(0, missing_reason)
 
     return RunResult(
         run_id=run_id,
@@ -216,6 +236,11 @@ class K6Adapter:
         script_path.write_text(script_code, encoding="utf-8")
 
         target_summary_path = summary_path or (out_dir / f"{run_id}.json")
+
+        # Delete any stale summary from a previous run so a failed k6 invocation
+        # cannot silently parse an old result.
+        if target_summary_path.exists():
+            target_summary_path.unlink()
 
         cmd = [
             self.k6_bin,
