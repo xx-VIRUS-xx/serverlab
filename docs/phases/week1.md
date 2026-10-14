@@ -1,6 +1,6 @@
 # Week 1 phase plan: skeleton + one end-to-end run
 
-Status: **DRAFT, awaiting human approval. No implementation code exists.**
+Status: **Approved 2026-10-14. Implemented and merged; acceptance results in section 10.**
 Source: `plan.md` s6 Week 1. Locked decisions s3.1-3.4 apply.
 
 ## 1. Scope
@@ -97,8 +97,21 @@ Order: L-2 first (unblocks all) -> C-1/C-2/C-3/A-1 in parallel -> A-2, A-3 -> L-
 
 ## 9. Deviations
 
-(none yet)
+- `serverlab run` executes k6 inside the compose `k6` service (via `ContainerExec`) so it honours the cpuset; the adapter was extended for this (lead).
+- Image refs may be a local content-addressed id `sha256:<64 hex>` as well as `name@sha256:`; the synthetic target is built locally and its id recorded in `environment.json`.
+- `target.build_context` / `dockerfile` and `k6_image` added to the spec.
+- Default k6 summary name changed to `<run_id>.k6summary.json` (collided with per-request output).
+- C-2 dropped a separate oversubscription check (unreachable once ids are distinct and in range).
 
 ## 10. Evidence
 
-(filled after implementation)
+Commands run on the dev Mac (Docker Desktop VM: 4 CPUs; SUT cpus 0-1, k6 cpu 2; `not-cross-machine-comparable`):
+
+1. `uv run serverlab run experiments/week1_smoke.yaml` -> exit 0
+   `planned=1000 completed=1001 dropped=0 peak_vus=10 p50=101.30ms p99=105.35ms` / `run valid`
+   Artifacts: `environment.json`, `compose.yaml`, `spec.yaml`, `raw/run_main_1.{json,hdr,k6summary.json}`. HDR read back: n=1001, p50 101.311 ms, p99 105.407 ms (k6 summary p99 105.35 ms).
+2. `uv run serverlab run experiments/week1_starved.yaml` -> exit 3
+   `planned=3000 completed=915 dropped=2086 peak_vus=5` / `RUN INVALID: dropped iterations ratio 0.6953 (2086/3000) exceeded 0.005 (0.5%) threshold; peak VUs (5) reached or exceeded max_vus (5)`. Containers torn down (0 left).
+3. `uv run ruff check . && uv run mypy . && uv run pytest -q` -> all clean, 71 passed (includes real-k6 integration tests A-3).
+
+Not verified this week: canonical Linux behaviour (cpuset isolation), Docker Desktop detection on Linux (backlog), warmup exclusion from the drop ratio (backlog).

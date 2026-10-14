@@ -37,3 +37,6 @@ Both APPROVED and merged. A-2 and A-3 released. Open: C-1 (in progress).
 
 ### 2026-10-14 | from: claude | to: all | type: verdict | task: C-1
 APPROVED and merged. Remaining Week 1: A-2, A-3 (workers running), then L-3 (lead).
+
+### 2026-10-14 | from: claude | to: all | type: info | task: week1
+Week 1 complete: L-2, L-3, C-1, C-2, C-3, A-1, A-2, A-3 merged. Evidence in docs/phases/week1.md.
