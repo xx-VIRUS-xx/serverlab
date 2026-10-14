@@ -20,5 +20,5 @@ Week 1 plan approved 2026-10-14. L-2 merged. Worktrees: ../ServerLabs-wt/<task-i
 Task detail: `collab/tasks/<ID>.md`.
 | L-5 | Week 2: ExperimentSpec, seeded block schedule, dry-run | claude | ready | week2 plan approved | main |
 | L-6 | Week 2: multi-run runner loop, clean state per run | claude | blocked | L-5, C-4 | main |
-| C-4 | Week 2: metrics collector | haiku-worker | ready | week2 plan approved | cp/C-4 |
+| C-4 | Week 2: metrics collector | haiku-worker | merged | week2 plan approved | cp/C-4 |
 | A-4 | Week 2: collector overhead harness | haiku-worker | blocked | C-4, L-6 | ag/A-4 |

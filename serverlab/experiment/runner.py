@@ -25,6 +25,7 @@ from serverlab.experiment.spec import ExperimentSpec, RunSpec
 from serverlab.load.base import RunResult
 from serverlab.load.hdr import build_hdr_from_json, write_hdr
 from serverlab.load.k6 import ContainerExec, K6Adapter
+from serverlab.metrics.collector import DockerStatsCollector
 from serverlab.topology.compose import render_compose
 from serverlab.topology.cpuset import CpuAssignment, assign_cpusets
 
@@ -35,6 +36,10 @@ HdrBuilder = Callable[[Path, Path], dict[str, int]]  # (ndjson, hdr out) -> valu
 class Collector(Protocol):
     def start(self, run_id: str, out_path: Path) -> None: ...
     def stop(self) -> Any: ...
+
+
+def default_collector_factory(containers: list[str]) -> Collector:
+    return DockerStatsCollector(interval_s=1.0, containers=containers)
 
 
 def build_hdr_file(ndjson: Path, out: Path) -> dict[str, int]:
@@ -136,7 +141,7 @@ def run_experiment(
     base_dir: Path | None = None,
     cmd: Cmd = shell,
     hdr_builder: HdrBuilder | None = build_hdr_file,
-    collector_factory: Callable[[], Collector] | None = None,
+    collector_factory: Callable[[list[str]], Collector] | None = default_collector_factory,
     sleep: Callable[[float], None] = time.sleep,
     adapter_factory: Callable[[ContainerExec], Any] | None = None,
 ) -> ExperimentOutcome:
@@ -201,7 +206,7 @@ def _run_one(
     *,
     cmd: Cmd,
     hdr_builder: HdrBuilder | None,
-    collector_factory: Callable[[], Collector] | None,
+    collector_factory: Callable[[list[str]], Collector] | None,
     sleep: Callable[[float], None],
     adapter_factory: Callable[[ContainerExec], Any] | None,
 ) -> RunRecord:
@@ -220,7 +225,11 @@ def _run_one(
     dc = ["docker", "compose", "-p", project, "-f", str(compose_file)]
     container = ContainerExec(compose_file, project, "k6", raw)
     adapter = adapter_factory(container) if adapter_factory else K6Adapter(container=container)
-    collector = collector_factory() if collector_factory and spec.metrics.enabled else None
+    # Only the SUT container: with no names, `docker stats` would watch the whole host.
+    collector = (
+        collector_factory([f"{project}-sut-1"]) if collector_factory and spec.metrics.enabled
+        else None
+    )
     started = datetime.now(UTC)
     metrics_stats: dict[str, Any] | None = None
     hdr_stats: dict[str, int] | None = None

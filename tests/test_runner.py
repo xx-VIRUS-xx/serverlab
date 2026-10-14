@@ -77,6 +77,10 @@ class Stats(BaseModel):
 
 class FakeCollector:
     started: list[str] = []
+    containers: list[list[str]] = []
+
+    def __init__(self, containers: list[str]) -> None:
+        FakeCollector.containers.append(containers)
 
     def start(self, run_id: str, out_path: Path) -> None:
         out_path.write_text('{"cpu_percent": 1.0}\n')
@@ -90,13 +94,15 @@ def _run(tmp_path: Path, spec: ExperimentSpec, docker: FakeDocker | None = None,
          adapter: FakeAdapter | None = None, **kw: Any) -> ExperimentOutcome:
     adapter = adapter or FakeAdapter()
     return run_experiment(spec, tmp_path, base_dir=tmp_path, cmd=docker or FakeDocker(),
-                          adapter_factory=lambda _c: adapter, sleep=lambda _s: None, **kw)
+                          adapter_factory=lambda _c: adapter, sleep=lambda _s: None,
+                          **{"collector_factory": None, **kw})
 
 
 def test_full_layout_and_fresh_state_per_run(tmp_path: Path) -> None:
     docker, adapter = FakeDocker(), FakeAdapter()
-    FakeCollector.started = []
+    FakeCollector.started, FakeCollector.containers = [], []
     out = _run(tmp_path, _spec(2), docker, adapter, collector_factory=FakeCollector)
+    assert all(len(c) == 1 and c[0].endswith("-sut-1") for c in FakeCollector.containers)
     d = out.result_dir
     for name in ("environment.json", "spec.yaml", "schedule.json"):
         assert (d / name).is_file()
