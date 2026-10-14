@@ -1,6 +1,6 @@
 # Week 2 phase plan: experiment framework
 
-Status: **Approved 2026-10-14 with the defaults in section 3 and 8. In progress.**
+Status: **Approved 2026-10-14 with the defaults in section 3 and 8. Implemented and merged; results in section 10.**
 Source: `plan.md` s6 Week 2; locked decisions s3.5 (randomized interleaving), s3.3 (out-of-band metrics). Backlog items stay out of scope unless listed in section 8.
 
 ## 1. Scope
@@ -81,7 +81,20 @@ class MetricsCollector(Protocol):
 5. Should I fold two backlog items into Week 2 (they're small): the Docker-Desktop-on-Linux detection and the git dirty flag in `env/detect.py`? Default: no, stay in scope.
 
 ## 9. Deviations
-(none yet)
+- ExperimentSpec expands to the Week 1 `RunSpec` per condition (`resolve()`), so the runner/compose layers are unchanged.
+- Added per-condition `metrics_enabled` override and runner-recorded `sut_cpu_usec` (cgroup `cpu.stat`, read via `docker exec`, independent of the collector) so the overhead check is an ordinary two-condition experiment plus `serverlab overhead`.
+- `docker stats` is served by the Docker daemon, so the collector's cost may land on the daemon rather than in the SUT cgroup. The check measures the effect on the SUT (CPU and latency); daemon-side cost is NOT measured.
+- Collector frames arrive ~2/s, so written gaps are 1.0-1.5 s, not exactly 1 s.
+- Demo spec uses 3 repetitions (acceptance); the ExperimentSpec default stays 5.
 
 ## 10. Evidence
-(filled after implementation)
+Dev Mac, Docker Desktop VM (4 CPUs; SUT cpus 0-1, k6 cpu 2), `not-cross-machine-comparable`.
+
+1. **Schedule determinism.** `serverlab run experiments/week2_demo.yaml --dry-run` twice, same seed: identical `order: limit10 limit5 limit5 limit10 limit10 limit5`. Seeds 1-6 gave 5 distinct orders (seed 99 happened to equal the demo seed; 8 possible orders for 2 conditions x 3 blocks). Unit tests also assert byte-identical `schedule.json`.
+2. **Demo run.** `serverlab run experiments/week2_demo.yaml` -> exit 0, 6/6 valid in the stored order, 6 run records, 6 HDR files, 6 metrics jsonl (12-15 samples each, 0 parse errors), compose projects torn down (0 `serverlab` containers, 0 `docker stats` processes left).
+3. **Collector overhead.** `serverlab run experiments/week2_overhead.yaml` (80 req/s, capacity 100, 6 reps per condition, interleaved) then `serverlab overhead`:
+   - collector-off: SUT utilization median 5.280% (min 4.389, max 6.164), median p99 109.13 ms
+   - collector-on: median 5.168% (min 4.409, max 6.944), median p99 109.84 ms
+   - difference -0.112 percentage points of SUT cpuset capacity -> **BELOW 2% threshold; on/off ranges overlap, so the difference is indistinguishable from run-to-run noise.**
+   Limits: the cpu window includes ~1-2 s of k6 container start-up while the SUT idles (denominator is the nominal 20 s), identical for both conditions; daemon-side cost unmeasured; single host, n=6. Re-measure on the Linux host before Week 4.
+4. ruff, mypy clean; 138 tests pass.
