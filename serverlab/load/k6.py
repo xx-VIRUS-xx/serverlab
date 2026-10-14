@@ -154,7 +154,12 @@ def parse_k6_summary(
     vus_max_metric = metrics.get("vus_max", {})
     peak_active = int(vus_metric.get("max", vus_metric.get("value", 0)))
     peak_allocated = int(vus_max_metric.get("max", vus_max_metric.get("value", 0)))
-    peak_vus = max(peak_active, peak_allocated)
+    if spec is not None and spec.pre_allocated_vus >= spec.max_vus:
+        # k6 allocates every VU up front in this case, so vus_max always equals
+        # max_vus; only active VUs can indicate that max_vus was reached.
+        peak_vus = peak_active
+    else:
+        peak_vus = max(peak_active, peak_allocated)
 
     # Latency percentiles in milliseconds.
     # Required keys: med, p(90), p(99), max.  No fallback to avg or p(95).

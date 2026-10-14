@@ -1,6 +1,7 @@
 """Tests for k6 summary parsing and validity checks (plan.md s3.2)."""
 
 import http.server
+import json
 import threading
 from pathlib import Path
 
@@ -375,6 +376,52 @@ def test_maxvus_hit_is_invalid() -> None:
     vus_reasons = [r for r in result.invalid_reasons if "peak VUs" in r]
     assert len(vus_reasons) == 1
     assert "peak VUs (4) reached or exceeded max_vus (4)" in vus_reasons[0]
+
+
+def _fixed_vus_summary(vus_active_max: int) -> dict[str, object]:
+    """CLEAN_FIXTURE with vus_max == 5 and a chosen active vus max (pre_allocated == max == 5)."""
+    raw: dict[str, object] = json.loads(CLEAN_FIXTURE)
+    metrics = raw["metrics"]
+    assert isinstance(metrics, dict)
+    metrics["vus_max"] = {"value": 5, "min": 5, "max": 5}
+    metrics["vus"] = {"value": vus_active_max, "min": vus_active_max, "max": vus_active_max}
+    return raw
+
+
+def test_fixed_vus_clean_summary_is_valid() -> None:
+    """pre_allocated_vus == max_vus: vus_max == max_vus must not invalidate the run."""
+    spec = LoadSpec(
+        rate=5,
+        duration_s=2,
+        pre_allocated_vus=5,
+        max_vus=5,
+        url="http://127.0.0.1:8000/fast",
+    )
+    result = parse_k6_summary(_fixed_vus_summary(vus_active_max=3), spec=spec, run_id="run_fixed")
+
+    assert result.dropped == 0
+    assert result.peak_vus == 3
+    assert result.valid is True
+    assert result.invalid_reasons == []
+
+
+def test_fixed_vus_active_vus_at_max_is_invalid() -> None:
+    """pre_allocated_vus == max_vus: active vus reaching max_vus must invalidate the run."""
+    spec = LoadSpec(
+        rate=5,
+        duration_s=2,
+        pre_allocated_vus=5,
+        max_vus=5,
+        url="http://127.0.0.1:8000/fast",
+    )
+    summary = _fixed_vus_summary(vus_active_max=5)
+    result = parse_k6_summary(summary, spec=spec, run_id="run_fixed_hit")
+
+    assert result.peak_vus == 5
+    assert result.valid is False
+    vus_reasons = [r for r in result.invalid_reasons if "peak VUs" in r]
+    assert len(vus_reasons) == 1
+    assert "max_vus (5)" in vus_reasons[0]
 
 
 def test_invalid_reasons_are_specific_strings_not_booleans() -> None:
