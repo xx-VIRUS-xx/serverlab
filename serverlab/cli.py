@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from serverlab.analysis.validate import coverage_checks
 from serverlab.experiment.runner import RunnerError, plan_schedule, run_experiment
 from serverlab.experiment.spec import load_experiment
 from serverlab.metrics.overhead import OverheadInputError, analyse, load_inputs, render
@@ -73,6 +74,24 @@ def overhead(
         typer.echo(line)
     if report.insufficient:
         raise typer.Exit(EXIT_INSUFFICIENT)
+
+
+@app.command()
+def validate(
+    offline: Annotated[bool, typer.Option(help="statistics checks only (no Docker/k6)")] = False,
+) -> None:
+    """Validate the tool itself. Exits non-zero if any check fails (docs/predictions.md)."""
+    checks = coverage_checks()
+    for c in checks:
+        typer.echo(f"[{'PASS' if c.passed else 'FAIL'}] {c.name}: {c.detail}")
+    if not offline:
+        typer.echo("[SKIP] knee recovery on the synthetic target: not wired yet (L-10)", err=True)
+        raise typer.Exit(EXIT_ERROR)
+    failed = [c for c in checks if not c.passed]
+    if failed:
+        typer.echo(f"VALIDATION FAILED: {len(failed)} check(s)", err=True)
+        raise typer.Exit(EXIT_INVALID_RUN)
+    typer.echo("offline validation passed")
 
 
 @app.command()
