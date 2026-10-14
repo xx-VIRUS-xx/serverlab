@@ -1,0 +1,27 @@
+# Collector overhead check (docs/phases/week2.md s3/s6.3). Same target, same load; only the metrics
+# collector differs. Offered 80 req/s against capacity 100 req/s. Dev host only; re-measure on Linux.
+name: week2_overhead
+seed: 424242
+repetitions: 6
+conditions:
+  - name: collector-off
+    metrics_enabled: false
+  - name: collector-on
+    metrics_enabled: true
+target:
+  image: serverlab-synthetic
+  build_context: .
+  dockerfile: targets/synthetic/Dockerfile
+  env: {CONCURRENCY_LIMIT: "10", SERVICE_TIME_MS: "100"}
+  port: 8000
+k6_image: grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+load:
+  rate: 80
+  duration_s: 20
+  pre_allocated_vus: 20
+  max_vus: 200
+  url: http://sut:8000/work
+cpus: {sut: [0, 1], load: [2]}
+warmup_s: 3
+cooldown_s: 2
+metrics: {enabled: true, interval_s: 1.0}

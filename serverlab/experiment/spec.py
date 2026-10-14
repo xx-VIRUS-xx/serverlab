@@ -50,6 +50,9 @@ class ConditionSpec(BaseModel):
     name: str = Field(pattern=r"^[A-Za-z0-9-]+$", description="no underscores: used in run ids")
     target_env: dict[str, str] = Field(default_factory=dict)
     load_rate: int | None = Field(default=None, gt=0)
+    metrics_enabled: bool | None = Field(
+        default=None, description="override metrics.enabled for this condition only"
+    )
 
 
 class ExperimentSpec(BaseModel):
@@ -74,6 +77,10 @@ class ExperimentSpec(BaseModel):
         if dupes:
             raise ValueError(f"duplicate condition names: {dupes}")
         return v
+
+    def collector_enabled(self, condition: str) -> bool:
+        cond = next(c for c in self.conditions if c.name == condition)
+        return self.metrics.enabled if cond.metrics_enabled is None else cond.metrics_enabled
 
     @property
     def condition_names(self) -> list[str]:

@@ -60,6 +60,7 @@ class FakeDocker:
     def __init__(self, fail_up_for: str | None = None) -> None:
         self.calls: list[list[str]] = []
         self.fail_up_for = fail_up_for
+        self.cpu_reads = 0
 
     def __call__(self, argv: Sequence[str]) -> "subprocess.CompletedProcess[str]":
         self.calls.append(list(argv))
@@ -67,6 +68,9 @@ class FakeDocker:
             self.fail_up_for in a for a in argv
         )
         out = SUT if "inspect" in argv else ""
+        if "exec" in argv:
+            self.cpu_reads += 1
+            out = f"usage_usec {self.cpu_reads * 1000}\nuser_usec 1\n"
         code, err = (1, "boom") if failed else (0, "")
         return subprocess.CompletedProcess(list(argv), code, out, err)
 
@@ -179,3 +183,17 @@ def test_cli_dry_run_prints_same_order_as_schedule_file(tmp_path: Path) -> None:
     again = CliRunner().invoke(app, ["run", str(spec_file), "--dry-run"])
     assert res.stdout == again.stdout and "order:" in res.stdout
     assert not (tmp_path / "results").exists()  # dry run writes nothing
+
+
+def test_sut_cpu_usec_recorded_from_cgroup_delta(tmp_path: Path) -> None:
+    out = _run(tmp_path, _spec(1))
+    # per run: one read before and one after the measured window => delta of 1000 us
+    assert [r.sut_cpu_usec for r in out.records] == [1000, 1000]
+    assert all(r.sut_cpu_note is None for r in out.records)
+
+
+def test_per_condition_metrics_override(tmp_path: Path) -> None:
+    spec = _spec(1, conditions=[{"name": "off", "metrics_enabled": False}, {"name": "on"}])
+    FakeCollector.started, FakeCollector.containers = [], []
+    _run(tmp_path, spec, collector_factory=FakeCollector)
+    assert FakeCollector.started == ["run_on_1"]

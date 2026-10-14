@@ -75,6 +75,8 @@ class RunRecord(BaseModel):
     cpus: dict[str, list[int]]
     hdr_stats: dict[str, int] | None = None
     metrics_stats: dict[str, Any] | None = None
+    sut_cpu_usec: int | None = None
+    sut_cpu_note: str | None = None
     comparability: str
     result: RunResult
 
@@ -99,6 +101,18 @@ class ExperimentOutcome:
     @property
     def all_valid(self) -> bool:
         return not self.errors and not self.invalid and len(self.records) == len(self.schedule.runs)
+
+
+def read_cpu_usec(cmd: Cmd, container: str) -> tuple[int | None, str | None]:
+    """Cumulative CPU time of a container from its own cgroup (independent of the collector)."""
+    proc = cmd(["docker", "exec", container, "cat", "/sys/fs/cgroup/cpu.stat"])
+    if proc.returncode != 0:
+        return None, f"cgroup cpu.stat unreadable: {proc.stderr.strip()[:120]}"
+    for line in proc.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        if key == "usage_usec" and value.strip().isdigit():
+            return int(value), None
+    return None, "usage_usec not found in cpu.stat (cgroup v1 or unexpected format)"
 
 
 def _must(cmd: Cmd, argv: Sequence[str], what: str) -> str:
@@ -226,10 +240,14 @@ def _run_one(
     container = ContainerExec(compose_file, project, "k6", raw)
     adapter = adapter_factory(container) if adapter_factory else K6Adapter(container=container)
     # Only the SUT container: with no names, `docker stats` would watch the whole host.
+    sut_container = f"{project}-sut-1"
     collector = (
-        collector_factory([f"{project}-sut-1"]) if collector_factory and spec.metrics.enabled
+        collector_factory([sut_container])
+        if collector_factory and spec.collector_enabled(run.condition)
         else None
     )
+    cpu_note: str | None = None
+    sut_cpu_usec: int | None = None
     started = datetime.now(UTC)
     metrics_stats: dict[str, Any] | None = None
     hdr_stats: dict[str, int] | None = None
@@ -245,11 +263,17 @@ def _run_one(
         ndjson = raw / f"{run_id}.requests.json"
         if collector is not None:
             collector.start(run_id, result_dir / "metrics" / f"{run_id}.jsonl")
+        cpu_before, cpu_note = read_cpu_usec(cmd, sut_container)
         try:
             result: RunResult = adapter.run(
                 run_spec.load, raw, run_id, per_request_path=ndjson,
                 summary_path=raw / f"{run_id}.k6summary.json",
             )
+            cpu_after, after_note = read_cpu_usec(cmd, sut_container)
+            if cpu_before is not None and cpu_after is not None:
+                sut_cpu_usec = cpu_after - cpu_before
+            else:
+                cpu_note = cpu_note or after_note
         finally:
             if collector is not None:
                 stats = collector.stop()
@@ -271,6 +295,7 @@ def _run_one(
         sut_image=sut_image, k6_image=spec.k6_image,
         cpus={"sut": list(assignment.sut), "load": list(assignment.load)},
         hdr_stats=hdr_stats, metrics_stats=metrics_stats,
+        sut_cpu_usec=sut_cpu_usec, sut_cpu_note=cpu_note,
         comparability=comparability, result=result,
     )
     (raw / f"{run_id}.json").write_text(record.model_dump_json(indent=2))
