@@ -97,4 +97,4 @@ Dev Mac, Docker Desktop VM (4 CPUs; SUT cpus 0-1, k6 cpu 2), `not-cross-machine-
    - collector-on: median 5.168% (min 4.409, max 6.944), median p99 109.84 ms
    - difference -0.112 percentage points of SUT cpuset capacity -> **BELOW 2% threshold; on/off ranges overlap, so the difference is indistinguishable from run-to-run noise.**
    Limits: the cpu window includes ~1-2 s of k6 container start-up while the SUT idles (denominator is the nominal 20 s), identical for both conditions; daemon-side cost unmeasured; single host, n=6. Re-measure on the Linux host before Week 4.
-4. ruff, mypy clean; 138 tests pass.
+4. ruff, mypy clean; 140 tests pass.
