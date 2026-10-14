@@ -1,0 +1,32 @@
+# Plumbing check for `serverlab sweep` only: one condition, small range. Not a validation run.
+name: sweep_smoke
+seed: 20261014
+repetitions: 1
+conditions:
+  - name: s100
+    target_env: {CONCURRENCY_LIMIT: "10"}
+target:
+  image: serverlab-synthetic
+  build_context: .
+  dockerfile: targets/synthetic/Dockerfile
+  env: {SERVICE_TIME_MS: "100"}
+  port: 8000
+k6_image: grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+load:
+  rate: 10
+  duration_s: 10
+  pre_allocated_vus: 50
+  max_vus: 1000
+  url: http://sut:8000/work
+cpus: {sut: [0, 1], load: [2]}
+warmup_s: 2
+cooldown_s: 0
+metrics: {enabled: false}
+sweep:
+  rate_lo: 50
+  rate_hi: 300
+  step_duration_s: 6
+  step_warmup_s: 2
+  coarse_points: 5
+  max_bisect: 0
+  width_target_pct: 5.0

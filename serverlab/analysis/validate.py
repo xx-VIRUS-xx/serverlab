@@ -7,6 +7,7 @@ retuned here. Every number is returned, pass or fail.
 import numpy as np
 from pydantic import BaseModel
 
+from serverlab.analysis.knee import KneeResult
 from serverlab.analysis.stats import DEFAULT_CONFIDENCE, DEFAULT_RESAMPLES, bootstrap_median_ci
 
 COVERAGE_TRIALS = 2000
@@ -82,4 +83,61 @@ def coverage_checks(seed: int = 20261014, trials: int = COVERAGE_TRIALS) -> list
                     f"resamples; band [{COVERAGE_BAND[0]}, {COVERAGE_BAND[1]}]) {verdict}"
                 ),
             ))
+    return out
+
+
+KNEE_TOLERANCE = 0.10  # docs/predictions.md rule 1
+MIN_BRACKETS_CONTAINING_C = 2  # docs/predictions.md rule 2
+
+
+def predicted_capacity(env: dict[str, str], base_env: dict[str, str]) -> float:
+    """C = CONCURRENCY_LIMIT / (SERVICE_TIME_MS / 1000), from the target's configured env only."""
+    merged = {**base_env, **env}
+    return float(merged["CONCURRENCY_LIMIT"]) / (float(merged["SERVICE_TIME_MS"]) / 1000.0)
+
+
+class KneeCheck(BaseModel):
+    condition: str
+    capacity: float
+    status: str
+    lo: float | None
+    hi: float | None
+    estimate: float | None
+    error_pct: float | None
+    bracket_contains_c: bool
+    within_tolerance: bool
+    excluded: int
+    steps: int
+
+
+def grade_knee(condition: str, capacity: float, knee: KneeResult, steps: int) -> KneeCheck:
+    est = knee.estimate
+    err = None if est is None else 100.0 * (est - capacity) / capacity
+    contains = knee.lo is not None and knee.hi is not None and knee.lo <= capacity <= knee.hi
+    return KneeCheck(
+        condition=condition, capacity=capacity, status=knee.status, lo=knee.lo, hi=knee.hi,
+        estimate=est, error_pct=err, bracket_contains_c=contains,
+        within_tolerance=err is not None and abs(err) <= KNEE_TOLERANCE * 100.0,
+        excluded=len(knee.excluded), steps=steps,
+    )
+
+
+def knee_checks(checks: list[KneeCheck]) -> list[CheckResult]:
+    out: list[CheckResult] = []
+    for c in checks:
+        est = "n/a" if c.estimate is None else f"{c.estimate:.1f}"
+        err = "n/a" if c.error_pct is None else f"{c.error_pct:+.1f}%"
+        br = "n/a" if c.lo is None or c.hi is None else f"[{c.lo:g}, {c.hi:g}]"
+        out.append(CheckResult(
+            name=f"knee {c.condition} (C={c.capacity:g})", passed=c.within_tolerance,
+            detail=(f"status={c.status} estimate={est} error={err} bracket={br} "
+                    f"contains_C={c.bracket_contains_c} steps={c.steps} excluded={c.excluded} "
+                    f"(tolerance {KNEE_TOLERANCE * 100:.0f}%)"),
+        ))
+    n_contain = sum(c.bracket_contains_c for c in checks)
+    out.append(CheckResult(
+        name="knee brackets containing C", passed=n_contain >= MIN_BRACKETS_CONTAINING_C,
+        detail=(f"{n_contain} of {len(checks)} brackets contain C "
+                f"(need >= {MIN_BRACKETS_CONTAINING_C})"),
+    ))
     return out

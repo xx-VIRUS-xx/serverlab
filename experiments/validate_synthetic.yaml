@@ -1,0 +1,37 @@
+# Tool validation target set (docs/predictions.md). Capacity C = CONCURRENCY_LIMIT / 0.1 s:
+# s50 = 50, s100 = 100, s200 = 200 req/s. Dev host only: validates the tool, makes no performance claim.
+name: validate_synthetic
+seed: 20261014
+repetitions: 1
+conditions:
+  - name: s50
+    target_env: {CONCURRENCY_LIMIT: "5"}
+  - name: s100
+    target_env: {CONCURRENCY_LIMIT: "10"}
+  - name: s200
+    target_env: {CONCURRENCY_LIMIT: "20"}
+target:
+  image: serverlab-synthetic
+  build_context: .
+  dockerfile: targets/synthetic/Dockerfile
+  env: {SERVICE_TIME_MS: "100"}
+  port: 8000
+k6_image: grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+load:
+  rate: 10
+  duration_s: 10
+  pre_allocated_vus: 50
+  max_vus: 1000
+  url: http://sut:8000/work
+cpus: {sut: [0, 1], load: [2]}
+warmup_s: 2
+cooldown_s: 0
+metrics: {enabled: false}
+sweep:
+  rate_lo: 20
+  rate_hi: 800
+  step_duration_s: 10
+  step_warmup_s: 2
+  coarse_points: 8
+  max_bisect: 6
+  width_target_pct: 5.0

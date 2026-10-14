@@ -67,6 +67,7 @@ class RunRecord(BaseModel):
     condition: str
     repetition: int
     index: int
+    offered_rate: int
     seed: int
     started_at: str
     finished_at: str
@@ -148,27 +149,26 @@ def plan_schedule(spec: ExperimentSpec) -> Schedule:
     return build_schedule(spec.condition_names, spec.repetitions, spec.seed)
 
 
-def run_experiment(
-    spec: ExperimentSpec,
-    results_root: Path,
-    *,
-    base_dir: Path | None = None,
-    cmd: Cmd = shell,
-    hdr_builder: HdrBuilder | None = build_hdr_file,
-    collector_factory: Callable[[list[str]], Collector] | None = default_collector_factory,
-    sleep: Callable[[float], None] = time.sleep,
-    adapter_factory: Callable[[ContainerExec], Any] | None = None,
-) -> ExperimentOutcome:
-    base = Path.cwd() if base_dir is None else base_dir
-    schedule = plan_schedule(spec)
-    result_dir = _fresh_dir(results_root, spec.name)
-    (result_dir / "raw").mkdir()
-    (result_dir / "metrics").mkdir()
-    (result_dir / "compose").mkdir()
-    (result_dir / "spec.yaml").write_text(yaml.safe_dump(spec.model_dump(mode="json")))
-    # The realized order is fixed and stored before anything runs.
-    (result_dir / "schedule.json").write_text(schedule.model_dump_json(indent=2))
+@dataclass
+class Prepared:
+    """Everything fixed once per experiment: result dir, image, CPU split, environment."""
 
+    result_dir: Path
+    sut_image: str
+    assignment: CpuAssignment
+    comparability: str
+
+
+def prepare_experiment(
+    spec: ExperimentSpec, results_root: Path, schedule: Schedule | None, *, base: Path, cmd: Cmd
+) -> Prepared:
+    result_dir = _fresh_dir(results_root, spec.name)
+    for sub in ("raw", "metrics", "compose"):
+        (result_dir / sub).mkdir()
+    (result_dir / "spec.yaml").write_text(yaml.safe_dump(spec.model_dump(mode="json")))
+    if schedule is not None:
+        # The realized order is fixed and stored before anything runs.
+        (result_dir / "schedule.json").write_text(schedule.model_dump_json(indent=2))
     sut_image = _resolve_sut_image(spec, base, cmd)
 
     # Total CPUs for validation = what the containers can see (the Docker VM on macOS).
@@ -183,13 +183,30 @@ def run_experiment(
         experiment_dir=base,
     )
     (result_dir / "environment.json").write_text(env.model_dump_json(indent=2))
+    return Prepared(result_dir, sut_image, assignment, env.comparability)
 
+
+def run_experiment(
+    spec: ExperimentSpec,
+    results_root: Path,
+    *,
+    base_dir: Path | None = None,
+    cmd: Cmd = shell,
+    hdr_builder: HdrBuilder | None = build_hdr_file,
+    collector_factory: Callable[[list[str]], Collector] | None = default_collector_factory,
+    sleep: Callable[[float], None] = time.sleep,
+    adapter_factory: Callable[[ContainerExec], Any] | None = None,
+) -> ExperimentOutcome:
+    base = Path.cwd() if base_dir is None else base_dir
+    schedule = plan_schedule(spec)
+    prep = prepare_experiment(spec, results_root, schedule, base=base, cmd=cmd)
+    result_dir = prep.result_dir
     outcome = ExperimentOutcome(result_dir=result_dir, schedule=schedule)
     for run in schedule.runs:
         run_id = run_id_for(run)
         try:
-            record = _run_one(
-                spec, run, sut_image, assignment, env.comparability, result_dir,
+            record = run_one(
+                spec, run, prep.sut_image, prep.assignment, prep.comparability, result_dir,
                 cmd=cmd, hdr_builder=hdr_builder, collector_factory=collector_factory,
                 sleep=sleep, adapter_factory=adapter_factory,
             )
@@ -210,7 +227,7 @@ class RunErrorFile(BaseModel):
     message: str
 
 
-def _run_one(
+def run_one(
     spec: ExperimentSpec,
     run: ScheduledRun,
     sut_image: str,
@@ -290,7 +307,7 @@ def _run_one(
 
     record = RunRecord(
         experiment=spec.name, condition=run.condition, repetition=run.repetition,
-        index=run.index, seed=spec.seed,
+        index=run.index, offered_rate=run_spec.load.rate, seed=spec.seed,
         started_at=started.isoformat(), finished_at=datetime.now(UTC).isoformat(),
         sut_image=sut_image, k6_image=spec.k6_image,
         cpus={"sut": list(assignment.sut), "load": list(assignment.load)},

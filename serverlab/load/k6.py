@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -241,11 +242,26 @@ class ContainerExec:
         rel = path.resolve().relative_to(self.host_dir.resolve())
         return f"{self.container_dir}/{rel.as_posix()}"
 
-    def prefix(self) -> list[str]:
-        return [
-            "docker", "compose", "-p", self.project, "-f", str(self.compose_file),
-            "run", "--rm", "-T", self.service,
-        ]
+    def prefix(self, entrypoint: str | None = None) -> list[str]:
+        base = ["docker", "compose", "-p", self.project, "-f", str(self.compose_file),
+                "run", "--rm", "-T"]
+        if entrypoint is not None:
+            base += ["--entrypoint", entrypoint]
+        return [*base, self.service]
+
+
+# Runs k6 and, after it exits, copies the container's own cgroup CPU counters next to the
+# results so the load generator's CPU use is known (a starved generator must not be mistaken
+# for a saturated SUT). The k6 exit code is preserved.
+_CPU_WRAPPER = 'k6 "$@"; rc=$?; cp /sys/fs/cgroup/cpu.stat "$CPU_STAT_PATH" 2>/dev/null; exit $rc'
+
+
+def parse_cpu_stat_usec(text: str) -> int | None:
+    for line in text.splitlines():
+        key, _, value = line.partition(" ")
+        if key == "usage_usec" and value.strip().isdigit():
+            return int(value)
+    return None
 
 
 class K6Adapter:
@@ -278,7 +294,14 @@ class K6Adapter:
         def arg(path: Path) -> str:
             return self.container.to_container(path) if self.container else str(path)
 
-        cmd = (self.container.prefix() if self.container else [self.k6_bin]) + [
+        cpu_stat = out_dir / f"{run_id}.k6cpu.stat"
+        cpu_stat.unlink(missing_ok=True)
+        if self.container:
+            script = f"CPU_STAT_PATH={arg(cpu_stat)} ; export CPU_STAT_PATH ; {_CPU_WRAPPER}"
+            head = [*self.container.prefix(entrypoint="sh"), "-c", script, "k6"]
+        else:
+            head = [self.k6_bin]
+        cmd = head + [
             "run",
             f"--summary-export={arg(target_summary_path)}",
             "--summary-trend-stats=med,p(90),p(99),max",
@@ -291,6 +314,7 @@ class K6Adapter:
 
         cmd.append(arg(script_path))
 
+        t0 = time.monotonic()
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         except Exception as exc:
@@ -327,12 +351,18 @@ class K6Adapter:
                 hdr_path=None,
             )
 
+        k6_wall_s = time.monotonic() - t0
         result = parse_k6_summary(
             target_summary_path,
             spec=spec,
             run_id=run_id,
             summary_path=target_summary_path,
         )
+        result = result.model_copy(update={"k6_wall_s": k6_wall_s})
+        if cpu_stat.is_file():
+            result = result.model_copy(
+                update={"k6_cpu_usec": parse_cpu_stat_usec(cpu_stat.read_text())}
+            )
 
         if proc.returncode != 0:
             result.valid = False

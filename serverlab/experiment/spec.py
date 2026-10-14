@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from serverlab.load.base import LoadSpec
 
@@ -44,6 +44,24 @@ class MetricsSpec(BaseModel):
     interval_s: float = Field(default=1.0, ge=1.0, description="sampling interval, >= 1 s")
 
 
+class SweepConfig(BaseModel):
+    """Rate sweep per condition: coarse log-spaced stage, then bracketed bisection."""
+
+    rate_lo: int = Field(ge=1)
+    rate_hi: int = Field(ge=2)
+    step_duration_s: int = Field(default=10, ge=3)
+    step_warmup_s: int = Field(default=2, ge=0)
+    coarse_points: int = Field(default=8, ge=3)
+    max_bisect: int = Field(default=6, ge=0)
+    width_target_pct: float = Field(default=5.0, gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "SweepConfig":
+        if self.rate_hi <= self.rate_lo:
+            raise ValueError(f"rate_hi ({self.rate_hi}) must exceed rate_lo ({self.rate_lo})")
+        return self
+
+
 class ConditionSpec(BaseModel):
     """One arm of the experiment. Only the listed overrides differ between conditions."""
 
@@ -67,6 +85,7 @@ class ExperimentSpec(BaseModel):
     cooldown_s: int = 5
     keep_raw: bool = False
     metrics: MetricsSpec = Field(default_factory=MetricsSpec)
+    sweep: SweepConfig | None = None
     conditions: list[ConditionSpec] = Field(min_length=1)
 
     @field_validator("conditions")

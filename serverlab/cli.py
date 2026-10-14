@@ -5,9 +5,15 @@ from typing import Annotated
 
 import typer
 
-from serverlab.analysis.validate import coverage_checks
+from serverlab.analysis.validate import (
+    coverage_checks,
+    grade_knee,
+    knee_checks,
+    predicted_capacity,
+)
 from serverlab.experiment.runner import RunnerError, plan_schedule, run_experiment
 from serverlab.experiment.spec import load_experiment
+from serverlab.experiment.sweeps import SweepOutcome, run_sweeps
 from serverlab.metrics.overhead import OverheadInputError, analyse, load_inputs, render
 
 app = typer.Typer(no_args_is_help=True, help="ServerLab experiment framework")
@@ -76,17 +82,73 @@ def overhead(
         raise typer.Exit(EXIT_INSUFFICIENT)
 
 
+def _print_sweep(outcome: SweepOutcome) -> None:
+    for cs in outcome.conditions:
+        k = cs.sweep.knee
+        typer.echo(f"[{cs.condition}] seed={cs.seed} coarse order: {cs.sweep.coarse_order}")
+        typer.echo(f"  bisect rates: {cs.sweep.bisect_rates}")
+        for s in cs.sweep.steps:
+            m = s.measurement
+            ach = "n/a" if m.achieved is None else f"{m.achieved:.1f}"
+            p99 = "n/a" if m.p99_ms is None else f"{m.p99_ms:.1f}"
+            cpu = "n/a" if m.k6_cpu_pct is None else f"{m.k6_cpu_pct:.0f}%"
+            typer.echo(
+                f"  rate={m.rate:<5g} {s.status:<13} achieved={ach:<7} p99={p99:<7}ms "
+                f"k6cpu={cpu:<5} {s.note}"
+            )
+        est = "n/a" if k.estimate is None else f"{k.estimate:.1f}"
+        typer.echo(f"  knee: {k.status} bracket=[{k.lo}, {k.hi}] estimate={est} {k.warnings}")
+
+
+@app.command()
+def sweep(
+    spec: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="spec with `sweep:`")],
+    results: Annotated[Path, typer.Option(help="results root directory")] = Path("results"),
+) -> None:
+    """Coarse log-spaced sweep, then bracketed search for the knee, per condition."""
+    try:
+        outcome = run_sweeps(load_experiment(spec), results, base_dir=spec.resolve().parent.parent)
+    except (RunnerError, ValueError, KeyError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(EXIT_ERROR) from exc
+    typer.echo(f"results: {outcome.result_dir}  comparability={outcome.comparability}")
+    _print_sweep(outcome)
+
+
 @app.command()
 def validate(
     offline: Annotated[bool, typer.Option(help="statistics checks only (no Docker/k6)")] = False,
+    spec: Annotated[Path, typer.Option(help="synthetic validation spec")] = Path(
+        "experiments/validate_synthetic.yaml"
+    ),
+    results: Annotated[Path, typer.Option(help="results root directory")] = Path("results"),
 ) -> None:
     """Validate the tool itself. Exits non-zero if any check fails (docs/predictions.md)."""
     checks = coverage_checks()
+    if not offline:
+        try:
+            experiment = load_experiment(spec)
+            outcome = run_sweeps(experiment, results, base_dir=spec.resolve().parent.parent)
+        except (RunnerError, ValueError, KeyError) as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(EXIT_ERROR) from exc
+        typer.echo(f"results: {outcome.result_dir}  comparability={outcome.comparability}")
+        _print_sweep(outcome)
+        graded = [
+            grade_knee(
+                cs.condition,
+                predicted_capacity(
+                    next(c.target_env for c in experiment.conditions if c.name == cs.condition),
+                    experiment.target.env,
+                ),
+                cs.sweep.knee,
+                len(cs.sweep.steps),
+            )
+            for cs in outcome.conditions
+        ]
+        checks = [*knee_checks(graded), *checks]
     for c in checks:
         typer.echo(f"[{'PASS' if c.passed else 'FAIL'}] {c.name}: {c.detail}")
-    if not offline:
-        typer.echo("[SKIP] knee recovery on the synthetic target: not wired yet (L-10)", err=True)
-        raise typer.Exit(EXIT_ERROR)
     failed = [c for c in checks if not c.passed]
     if failed:
         typer.echo(f"VALIDATION FAILED: {len(failed)} check(s)", err=True)

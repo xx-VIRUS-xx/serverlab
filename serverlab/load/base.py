@@ -36,6 +36,12 @@ class RunResult(BaseModel):
     error_rate: float
     valid: bool
     invalid_reasons: list[str] = Field(default_factory=list)
+    k6_cpu_usec: int | None = Field(
+        default=None, description="load generator container CPU time (cgroup), if captured"
+    )
+    k6_wall_s: float | None = Field(
+        default=None, description="wall time of the whole k6 process/container, incl. drain"
+    )
     summary_path: Path
     hdr_path: Path | None = None
 
