@@ -1,6 +1,6 @@
 # Week 2 phase plan: experiment framework
 
-Status: **DRAFT, awaiting human approval. No Week 2 code exists.**
+Status: **Approved 2026-10-14 with the defaults in section 3 and 8. In progress.**
 Source: `plan.md` s6 Week 2; locked decisions s3.5 (randomized interleaving), s3.3 (out-of-band metrics). Backlog items stay out of scope unless listed in section 8.
 
 ## 1. Scope
