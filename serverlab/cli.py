@@ -7,11 +7,13 @@ import typer
 
 from serverlab.experiment.runner import RunnerError, plan_schedule, run_experiment
 from serverlab.experiment.spec import load_experiment
+from serverlab.metrics.overhead import OverheadInputError, analyse, load_inputs, render
 
 app = typer.Typer(no_args_is_help=True, help="ServerLab experiment framework")
 
 EXIT_ERROR = 2
 EXIT_INVALID_RUN = 3
+EXIT_INSUFFICIENT = 3
 
 
 @app.command()
@@ -49,6 +51,28 @@ def run(
     if not outcome.all_valid:
         raise typer.Exit(EXIT_INVALID_RUN)
     typer.echo("all runs valid")
+
+
+@app.command()
+def overhead(
+    results_dir: Annotated[
+        Path, typer.Argument(exists=True, file_okay=False, help="finished experiment result dir")
+    ],
+) -> None:
+    """Collector overhead: SUT CPU utilization with collector-off vs collector-on.
+
+    Exit 0 on a verdict, 2 on bad input, 3 if fewer than 3 included runs per condition.
+    """
+    try:
+        params, sources = load_inputs(results_dir)
+        report = analyse(params, sources)
+    except OverheadInputError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(EXIT_ERROR) from exc
+    for line in render(report):
+        typer.echo(line)
+    if report.insufficient:
+        raise typer.Exit(EXIT_INSUFFICIENT)
 
 
 @app.command()
