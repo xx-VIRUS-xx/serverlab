@@ -24,6 +24,6 @@ Task detail: `collab/tasks/<ID>.md`.
 | A-4 | Week 2: collector overhead analysis command | haiku-worker | merged | C-4 | ag/A-4 |
 | L-8 | Week 3: stats (bootstrap, effect size, HDR merge) + coverage sim + predictions.md | claude | merged | week3 plan approved | main |
 | L-9 | Week 3: knee finder (pure) | claude | merged | week3 plan approved | main |
-| C-5 | Week 3: synthetic keep-alive + measured throughput ceiling | haiku-worker | ready | week3 plan approved | cp/C-5 |
+| C-5 | Week 3: synthetic keep-alive + measured throughput ceiling | haiku-worker | merged | week3 plan approved | cp/C-5 |
 | A-5 | Week 3: coarse + bracket sweep driver | haiku-worker | merged | L-9 | ag/A-5 |
 | L-10 | Week 3: sweep/validate CLI, k6 cgroup CPU | claude | blocked | L-8, L-9, C-5, A-5 | main |
