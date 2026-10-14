@@ -8,9 +8,9 @@ Week 1 plan approved 2026-10-14. L-2 merged. Worktrees: ../ServerLabs-wt/<task-i
 |---|---|---|---|---|---|
 | L-1 | Week 1 phase plan | claude | merged | - | main |
 | L-2 | Repo scaffold: pyproject, package skeleton, `LoadAdapter` protocol, spec models | claude | merged | - | main |
-| L-3 | Single-condition `serverlab run` + runner lifecycle | claude | blocked | L-2, A-1, C-1, C-2 | main |
+| L-3 | Single-condition `serverlab run` + runner lifecycle | claude | ready | L-2, A-1, C-1, C-2 | main |
 | L-4 | Review and merge all Week 1 tasks | claude | blocked | all | main |
-| C-1 | Environment capture `env/detect.py` + tests | copilot | in-progress | L-2 | cp/C-1 |
+| C-1 | Environment capture `env/detect.py` + tests | copilot | merged | L-2 | cp/C-1 |
 | C-2 | Compose topology generation with cpuset split + tests | copilot | merged | L-2 | cp/C-2 |
 | C-3 | Synthetic target server (sleep + semaphore, known capacity) | copilot | merged | L-2 | cp/C-3 |
 | A-1 | k6 adapter: script gen, run, summary parse, validity check | antigravity | merged | L-2 | ag/A-1 |
