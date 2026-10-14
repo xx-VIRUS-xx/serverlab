@@ -1,6 +1,9 @@
 # Week 1 starved: VUs deliberately too few, must be reported invalid.
 name: week1_starved
 seed: 1
+repetitions: 1
+conditions:
+  - name: main
 target:
   image: serverlab-synthetic
   build_context: .

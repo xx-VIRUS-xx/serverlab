@@ -1,5 +1,6 @@
-"""Runner lifecycle with Docker and the load adapter faked (no k6, no containers)."""
+"""Experiment lifecycle with Docker, the load adapter and the collector faked."""
 
+import datetime as dt
 import json
 import subprocess
 from collections.abc import Sequence
@@ -7,9 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
+from typer.testing import CliRunner
 
-from serverlab.experiment.runner import Outcome, RunnerError, run_single
-from serverlab.experiment.spec import RunSpec
+import serverlab.experiment.runner as runner
+from serverlab.cli import app
+from serverlab.experiment.runner import ExperimentOutcome, run_experiment
+from serverlab.experiment.spec import ExperimentSpec
 from serverlab.load.base import LatencyMs, LoadSpec, RunResult
 
 K6 = "grafana/k6@sha256:" + "1" * 64
@@ -17,22 +22,22 @@ SUT = "sha256:" + "2" * 64
 BUILD = {"build_context": ".", "dockerfile": "Dockerfile"}
 
 
-def _spec(build: bool = False, cpus: dict[str, list[int]] | None = None) -> RunSpec:
-    return RunSpec.model_validate(
-        {
-            "name": "unit", "seed": 7, "warmup_s": 1, "cooldown_s": 0,
-            "target": {"image": SUT, **(BUILD if build else {})},
-            "k6_image": K6,
-            "load": {"rate": 10, "duration_s": 3, "pre_allocated_vus": 2, "max_vus": 5,
-                     "url": "http://sut:8000/work"},
-            "cpus": cpus or {"sut": [0], "load": [1]},
-        }
-    )
+def _spec(reps: int = 2, **over: Any) -> ExperimentSpec:
+    raw: dict[str, Any] = {
+        "name": "unit", "seed": 7, "repetitions": reps, "warmup_s": 1, "cooldown_s": 0,
+        "target": {"image": SUT}, "k6_image": K6,
+        "load": {"rate": 10, "duration_s": 3, "pre_allocated_vus": 2, "max_vus": 5,
+                 "url": "http://sut:8000/work"},
+        "cpus": {"sut": [0], "load": [1]},
+        "conditions": [{"name": "A"}, {"name": "B", "target_env": {"X": "2"}}],
+    }
+    raw.update(over)
+    return ExperimentSpec.model_validate(raw)
 
 
 class FakeAdapter:
-    def __init__(self, valid: bool = True) -> None:
-        self.valid = valid
+    def __init__(self, invalid_runs: set[str] | None = None) -> None:
+        self.invalid_runs = invalid_runs or set()
         self.calls: list[str] = []
 
     def run(self, spec: LoadSpec, out_dir: Path, run_id: str, **kw: Any) -> RunResult:
@@ -42,71 +47,129 @@ class FakeAdapter:
                 json.dumps({"type": "Point", "metric": "http_req_duration",
                             "data": {"value": 5.0}}) + "\n"
             )
+        bad = run_id in self.invalid_runs
         return RunResult(
-            run_id=run_id, planned=30, completed=30, dropped=0 if self.valid else 20,
+            run_id=run_id, planned=30, completed=30, dropped=20 if bad else 0,
             peak_vus=1, latency_ms=LatencyMs(p50=1, p90=2, p99=3, max=4), error_rate=0,
-            valid=self.valid, invalid_reasons=[] if self.valid else ["dropped"],
+            valid=not bad, invalid_reasons=["dropped"] if bad else [],
             summary_path=out_dir / f"{run_id}.k6summary.json",
         )
 
 
 class FakeDocker:
-    def __init__(self, fail_on: str | None = None) -> None:
+    def __init__(self, fail_up_for: str | None = None) -> None:
         self.calls: list[list[str]] = []
-        self.fail_on = fail_on
+        self.fail_up_for = fail_up_for
 
     def __call__(self, argv: Sequence[str]) -> "subprocess.CompletedProcess[str]":
         self.calls.append(list(argv))
-        failed = self.fail_on is not None and self.fail_on in argv
+        failed = "up" in argv and self.fail_up_for is not None and any(
+            self.fail_up_for in a for a in argv
+        )
         out = SUT if "inspect" in argv else ""
         code, err = (1, "boom") if failed else (0, "")
         return subprocess.CompletedProcess(list(argv), code, out, err)
 
 
-def _run(tmp_path: Path, spec: RunSpec, docker: FakeDocker, adapter: FakeAdapter) -> Outcome:
-    return run_single(spec, tmp_path, base_dir=tmp_path, cmd=docker,
-                      adapter_factory=lambda _c: adapter, sleep=lambda _s: None)
+class Stats(BaseModel):
+    samples: int = 3
 
 
-def test_artifacts_and_teardown(tmp_path: Path) -> None:
+class FakeCollector:
+    started: list[str] = []
+
+    def start(self, run_id: str, out_path: Path) -> None:
+        out_path.write_text('{"cpu_percent": 1.0}\n')
+        FakeCollector.started.append(run_id)
+
+    def stop(self) -> Stats:
+        return Stats()
+
+
+def _run(tmp_path: Path, spec: ExperimentSpec, docker: FakeDocker | None = None,
+         adapter: FakeAdapter | None = None, **kw: Any) -> ExperimentOutcome:
+    adapter = adapter or FakeAdapter()
+    return run_experiment(spec, tmp_path, base_dir=tmp_path, cmd=docker or FakeDocker(),
+                          adapter_factory=lambda _c: adapter, sleep=lambda _s: None, **kw)
+
+
+def test_full_layout_and_fresh_state_per_run(tmp_path: Path) -> None:
     docker, adapter = FakeDocker(), FakeAdapter()
-    out = _run(tmp_path, _spec(), docker, adapter)
+    FakeCollector.started = []
+    out = _run(tmp_path, _spec(2), docker, adapter, collector_factory=FakeCollector)
     d = out.result_dir
-    assert (d / "environment.json").is_file() and (d / "spec.yaml").is_file()
-    assert (d / "compose.yaml").is_file() and (d / "raw" / "run_main_1.json").is_file()
-    assert (d / "raw" / "run_main_1.hdr").is_file()
-    assert not (d / "raw" / "run_main_1.requests.json").exists()  # keep_raw is false
-    assert adapter.calls == ["warmup", "run_main_1"]
-    assert any("down" in c for c in docker.calls[-1:])
-    assert out.valid and out.record.hdr_stats == {
-        "recorded": 1, "below_range": 0, "above_range": 0, "other_lines": 0}
+    for name in ("environment.json", "spec.yaml", "schedule.json"):
+        assert (d / name).is_file()
+    assert len(out.records) == 4 and out.all_valid
+    for rec in out.records:
+        rid = f"run_{rec.condition}_{rec.repetition}"
+        assert (d / "raw" / f"{rid}.json").is_file() and (d / "raw" / f"{rid}.hdr").is_file()
+        assert (d / "metrics" / f"{rid}.jsonl").is_file()
+        assert (d / "compose" / f"{rid}.yaml").is_file()
+        assert not (d / "raw" / f"{rid}.requests.json").exists()  # keep_raw false
+    ups = [c for c in docker.calls if "up" in c]
+    downs = [c for c in docker.calls if "down" in c]
+    assert len(ups) == len(downs) == 4  # a fresh stack per scheduled run
+    assert len({c[3] for c in ups}) == 4  # distinct compose project per run
+    assert [r.index for r in out.records] == [0, 1, 2, 3]
+    assert sorted(FakeCollector.started) == sorted(
+        f"run_{r.condition}_{r.repetition}" for r in out.records
+    )
 
 
-def test_invalid_run_is_reported_not_hidden(tmp_path: Path) -> None:
-    out = _run(tmp_path, _spec(), FakeDocker(), FakeAdapter(valid=False))
-    assert not out.valid
-    saved = json.loads((out.result_dir / "raw" / "run_main_1.json").read_text())
+def test_execution_follows_stored_schedule(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    out = _run(tmp_path, _spec(3), adapter=adapter)
+    stored = json.loads((out.result_dir / "schedule.json").read_text())
+    expected = [f"run_{r['condition']}_{r['repetition']}" for r in stored["runs"]]
+    assert [c for c in adapter.calls if not c.endswith(".warmup")] == expected
+
+
+def test_conditions_get_their_own_env(tmp_path: Path) -> None:
+    out = _run(tmp_path, _spec(1))
+    import yaml
+    for name in ("A", "B"):
+        doc = yaml.safe_load((out.result_dir / "compose" / f"run_{name}_1.yaml").read_text())
+        env = doc["services"]["sut"]["environment"]
+        assert ("X" in env) == (name == "B")
+
+
+def test_invalid_runs_kept_flagged_not_retried(tmp_path: Path) -> None:
+    adapter = FakeAdapter(invalid_runs={"run_A_1"})
+    out = _run(tmp_path, _spec(2), adapter=adapter)
+    assert not out.all_valid and [r.condition for r in out.invalid] == ["A"]
+    assert len(out.records) == 4 and adapter.calls.count("run_A_1") == 1
+    saved = json.loads((out.result_dir / "raw" / "run_A_1.json").read_text())
     assert saved["result"]["valid"] is False and saved["result"]["invalid_reasons"] == ["dropped"]
 
 
-def test_teardown_runs_when_compose_up_fails(tmp_path: Path) -> None:
-    docker = FakeDocker(fail_on="up")
-    with pytest.raises(RunnerError, match="compose up"):
-        _run(tmp_path, _spec(), docker, FakeAdapter())
-    assert "down" in docker.calls[-1]
+def test_failed_run_recorded_and_experiment_continues(tmp_path: Path) -> None:
+    docker = FakeDocker(fail_up_for="run-a-1")
+    out = _run(tmp_path, _spec(2), docker)
+    assert [e.run_id for e in out.errors] == ["run_A_1"] and len(out.records) == 3
+    assert (out.result_dir / "raw" / "run_A_1.error.json").is_file()
+    assert not out.all_valid
+    assert sum("down" in c for c in docker.calls) == 4  # torn down even after the failure
 
 
 def test_results_dir_never_reused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import datetime as dt
-
-    import serverlab.experiment.runner as runner
-
     class Frozen(dt.datetime):
         @classmethod
         def now(cls, tz: dt.tzinfo | None = None) -> "Frozen":
             return cls(2026, 1, 1, 0, 0, 0, tzinfo=tz)
 
     monkeypatch.setattr(runner, "datetime", Frozen)
-    _run(tmp_path, _spec(), FakeDocker(), FakeAdapter())
+    _run(tmp_path, _spec(1))
     with pytest.raises(FileExistsError):
-        _run(tmp_path, _spec(), FakeDocker(), FakeAdapter())
+        _run(tmp_path, _spec(1))
+
+
+def test_cli_dry_run_prints_same_order_as_schedule_file(tmp_path: Path) -> None:
+    import yaml
+    spec_file = tmp_path / "e.yaml"
+    spec_file.write_text(yaml.safe_dump(_spec(3).model_dump(mode="json")))
+    res = CliRunner().invoke(app, ["run", str(spec_file), "--dry-run"])
+    assert res.exit_code == 0
+    again = CliRunner().invoke(app, ["run", str(spec_file), "--dry-run"])
+    assert res.stdout == again.stdout and "order:" in res.stdout
+    assert not (tmp_path / "results").exists()  # dry run writes nothing

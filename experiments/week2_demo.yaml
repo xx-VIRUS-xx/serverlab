@@ -1,0 +1,27 @@
+# Week 2 demo: two arms of the synthetic target (capacity = CONCURRENCY_LIMIT / 0.1 s: A = 50, B = 100 req/s).
+# Offered 40 req/s is below both capacities; this checks the framework, not a finding. Dev host only.
+name: week2_demo
+seed: 20261014
+repetitions: 3
+conditions:
+  - name: limit5
+    target_env: {CONCURRENCY_LIMIT: "5"}
+  - name: limit10
+    target_env: {CONCURRENCY_LIMIT: "10"}
+target:
+  image: serverlab-synthetic
+  build_context: .
+  dockerfile: targets/synthetic/Dockerfile
+  env: {SERVICE_TIME_MS: "100"}
+  port: 8000
+k6_image: grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+load:
+  rate: 40
+  duration_s: 15
+  pre_allocated_vus: 10
+  max_vus: 100
+  url: http://sut:8000/work
+cpus: {sut: [0, 1], load: [2]}
+warmup_s: 3
+cooldown_s: 2
+metrics: {enabled: true, interval_s: 1.0}

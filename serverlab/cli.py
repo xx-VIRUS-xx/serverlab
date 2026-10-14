@@ -5,39 +5,50 @@ from typing import Annotated
 
 import typer
 
-from serverlab.experiment.runner import RunnerError, run_single
-from serverlab.experiment.spec import load_spec
+from serverlab.experiment.runner import RunnerError, plan_schedule, run_experiment
+from serverlab.experiment.spec import load_experiment
 
 app = typer.Typer(no_args_is_help=True, help="ServerLab experiment framework")
 
-EXIT_INVALID_RUN = 3
 EXIT_ERROR = 2
+EXIT_INVALID_RUN = 3
 
 
 @app.command()
 def run(
     spec: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="experiment YAML")],
     results: Annotated[Path, typer.Option(help="results root directory")] = Path("results"),
+    dry_run: Annotated[bool, typer.Option(help="print the schedule and exit")] = False,
 ) -> None:
-    """Run a single-condition experiment. Exit 3 if the run is invalid (artifacts still written)."""
+    """Run an experiment. Exit 3 if any run is invalid or errored (all artifacts still written)."""
     try:
-        outcome = run_single(load_spec(spec), results, base_dir=spec.resolve().parent.parent)
-    except (RunnerError, ValueError) as exc:
+        experiment = load_experiment(spec)
+        if dry_run:
+            sched = plan_schedule(experiment)
+            typer.echo(f"seed={sched.seed} method={sched.method} repetitions={sched.repetitions}")
+            typer.echo(f"order: {sched.order()}")
+            return
+        outcome = run_experiment(experiment, results, base_dir=spec.resolve().parent.parent)
+    except (RunnerError, ValueError, KeyError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(EXIT_ERROR) from exc
-    res = outcome.record.result
     typer.echo(f"results: {outcome.result_dir}")
-    typer.echo(
-        f"planned={res.planned} completed={res.completed} dropped={res.dropped} "
-        f"peak_vus={res.peak_vus} p50={res.latency_ms.p50:.2f}ms p99={res.latency_ms.p99:.2f}ms "
-        f"comparability={outcome.record.comparability}"
-    )
-    if not outcome.valid:
-        typer.echo("RUN INVALID:", err=True)
+    typer.echo(f"order: {outcome.schedule.order()}")
+    for rec in sorted(outcome.records, key=lambda r: r.index):
+        res = rec.result
+        typer.echo(
+            f"#{rec.index} {rec.condition}/{rec.repetition} "
+            f"{'valid' if res.valid else 'INVALID'} planned={res.planned} dropped={res.dropped} "
+            f"p50={res.latency_ms.p50:.2f}ms p99={res.latency_ms.p99:.2f}ms"
+        )
         for reason in res.invalid_reasons:
-            typer.echo(f"  - {reason}", err=True)
+            typer.echo(f"    - {reason}", err=True)
+    for err in outcome.errors:
+        typer.echo(f"ERROR {err.run_id}: {err.message}", err=True)
+    typer.echo(f"comparability={outcome.records[0].comparability}" if outcome.records else "")
+    if not outcome.all_valid:
         raise typer.Exit(EXIT_INVALID_RUN)
-    typer.echo("run valid")
+    typer.echo("all runs valid")
 
 
 @app.command()

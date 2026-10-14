@@ -1,6 +1,9 @@
 # Week 1 smoke: synthetic target, capacity = CONCURRENCY_LIMIT / SERVICE_TIME = 100 req/s (dev host, not comparable).
 name: week1_smoke
 seed: 1
+repetitions: 1
+conditions:
+  - name: main
 target:
   image: serverlab-synthetic
   build_context: .
