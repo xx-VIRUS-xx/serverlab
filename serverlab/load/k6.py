@@ -6,12 +6,14 @@ import json
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from serverlab.load.base import LatencyMs, LoadSpec, RunResult
 
 __all__ = [
+    "ContainerExec",
     "K6Adapter",
     "check_validity",
     "find_k6_binary",
@@ -221,11 +223,37 @@ def parse_k6_summary(
     )
 
 
+@dataclass(frozen=True)
+class ContainerExec:
+    """Run k6 inside a compose service (so it honours that service's cpuset).
+
+    `host_dir` is bind-mounted at `container_dir` by the compose file; every path
+    handed to k6 must live under `host_dir` and is translated to `container_dir`.
+    """
+
+    compose_file: Path
+    project: str
+    service: str
+    host_dir: Path
+    container_dir: str = "/work"
+
+    def to_container(self, path: Path) -> str:
+        rel = path.resolve().relative_to(self.host_dir.resolve())
+        return f"{self.container_dir}/{rel.as_posix()}"
+
+    def prefix(self) -> list[str]:
+        return [
+            "docker", "compose", "-p", self.project, "-f", str(self.compose_file),
+            "run", "--rm", "-T", self.service,
+        ]
+
+
 class K6Adapter:
     """k6 adapter implementing the LoadAdapter protocol."""
 
-    def __init__(self, k6_bin: str = "k6") -> None:
+    def __init__(self, k6_bin: str = "k6", container: ContainerExec | None = None) -> None:
         self.k6_bin = find_k6_binary(k6_bin)
+        self.container = container
 
     def run(
         self,
@@ -240,28 +268,28 @@ class K6Adapter:
         script_code = generate_k6_script(spec)
         script_path.write_text(script_code, encoding="utf-8")
 
-        target_summary_path = summary_path or (out_dir / f"{run_id}.json")
+        target_summary_path = summary_path or (out_dir / f"{run_id}.k6summary.json")
 
         # Delete any stale summary from a previous run so a failed k6 invocation
         # cannot silently parse an old result.
         if target_summary_path.exists():
             target_summary_path.unlink()
 
-        cmd = [
-            self.k6_bin,
+        def arg(path: Path) -> str:
+            return self.container.to_container(path) if self.container else str(path)
+
+        cmd = (self.container.prefix() if self.container else [self.k6_bin]) + [
             "run",
-            f"--summary-export={target_summary_path}",
+            f"--summary-export={arg(target_summary_path)}",
             "--summary-trend-stats=med,p(90),p(99),max",
         ]
 
         if per_request_path is not None:
             per_request_path.parent.mkdir(parents=True, exist_ok=True)
-            if str(per_request_path).endswith(".csv"):
-                cmd.extend(["--out", f"csv={per_request_path}"])
-            else:
-                cmd.extend(["--out", f"json={per_request_path}"])
+            fmt = "csv" if str(per_request_path).endswith(".csv") else "json"
+            cmd.extend(["--out", f"{fmt}={arg(per_request_path)}"])
 
-        cmd.append(str(script_path))
+        cmd.append(arg(script_path))
 
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, check=False)

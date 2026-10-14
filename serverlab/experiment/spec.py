@@ -9,7 +9,14 @@ from serverlab.load.base import LoadSpec
 
 
 class TargetSpec(BaseModel):
-    image: str = Field(description="must be pinned by digest: name@sha256:...")
+    image: str = Field(
+        description="pinned image: name@sha256:... or local id sha256:...; "
+        "when build_context is set it is only a label and the built image id is used"
+    )
+    build_context: str | None = Field(
+        default=None, description="docker build context (relative to the spec file's cwd)"
+    )
+    dockerfile: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     port: int = 8000
     health_path: str = "/healthz"
@@ -24,6 +31,7 @@ class RunSpec(BaseModel):
     name: str
     seed: int
     target: TargetSpec
+    k6_image: str = Field(description="pinned k6 image: name@sha256:...")
     load: LoadSpec
     cpus: CpuSpec
     warmup_s: int = 5

@@ -6,6 +6,7 @@ Pure function. No Docker calls; the runner (L-3) writes the file.
 import json
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from serverlab.experiment.spec import RunSpec
@@ -15,13 +16,17 @@ SUT_SERVICE = "sut"
 K6_SERVICE = "k6"
 NETWORK = "lab"
 
-_DIGEST_REF = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$")
+# Immutable references only: a registry digest, or a local content-addressed image id.
+_DIGEST_REF = re.compile(
+    r"^([a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?@)?sha256:[0-9a-f]{64}$"
+)
 
 
 def _check_digest_ref(label: str, ref: str) -> None:
     if not _DIGEST_REF.match(ref):
         raise ValueError(
-            f"{label} image must be pinned by digest as 'name@sha256:<64 hex>', got {ref!r}"
+            f"{label} image must be pinned by digest ('name@sha256:<64 hex>' or local id "
+            f"'sha256:<64 hex>'), got {ref!r}"
         )
 
 
@@ -44,6 +49,7 @@ def render_compose(
     spec: RunSpec,
     assignment: CpuAssignment,
     image_digests: Mapping[str, str],
+    work_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Build a compose document (as a dict) with services `sut` and `k6`.
 
@@ -81,6 +87,8 @@ def render_compose(
         "networks": [NETWORK],
         "depends_on": {SUT_SERVICE: {"condition": "service_healthy"}},
     }
+    if work_dir is not None:
+        k6_service["volumes"] = [f"{work_dir.resolve()}:/work"]
     return {
         "services": {SUT_SERVICE: sut_service, K6_SERVICE: k6_service},
         "networks": {NETWORK: {"driver": "bridge"}},

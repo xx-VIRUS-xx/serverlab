@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import pytest
 import yaml
@@ -21,6 +22,7 @@ def _spec(**overrides: object) -> RunSpec:
             "port": 8000,
             "health_path": "/healthz",
         },
+        "k6_image": K6_DIGEST,
         "load": {
             "rate": 10,
             "duration_s": 5,
@@ -124,3 +126,12 @@ def test_assignment_must_match_spec_cpus() -> None:
 def test_rendered_document_is_plain_yaml_serialisable() -> None:
     doc = copy.deepcopy(_render())
     assert yaml.safe_load(yaml.safe_dump(doc)) == doc
+
+
+def test_local_image_id_is_accepted_and_work_dir_mounted(tmp_path: Path) -> None:
+    local = "sha256:" + "c" * 64
+    s = _spec(target={"image": local})
+    a = assign_cpusets(4, [0, 1], [2])
+    doc = render_compose(s, a, {"sut": local, "k6": K6_DIGEST}, work_dir=tmp_path)
+    assert doc["services"]["sut"]["image"] == local
+    assert doc["services"]["k6"]["volumes"] == [f"{tmp_path.resolve()}:/work"]

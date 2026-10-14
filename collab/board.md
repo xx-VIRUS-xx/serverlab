@@ -14,7 +14,7 @@ Week 1 plan approved 2026-10-14. L-2 merged. Worktrees: ../ServerLabs-wt/<task-i
 | C-2 | Compose topology generation with cpuset split + tests | copilot | merged | L-2 | cp/C-2 |
 | C-3 | Synthetic target server (sleep + semaphore, known capacity) | copilot | merged | L-2 | cp/C-3 |
 | A-1 | k6 adapter: script gen, run, summary parse, validity check | antigravity | merged | L-2 | ag/A-1 |
-| A-2 | HDR export from k6 per-request output + tests | antigravity | ready | A-1 | ag/A-2 |
+| A-2 | HDR export from k6 per-request output + tests | antigravity | merged | A-1 | ag/A-2 |
 | A-3 | Invalid-run test: starved VUs must yield `invalid` | antigravity | ready | A-1 | ag/A-3 |
 
 Task detail: `collab/tasks/<ID>.md`.
