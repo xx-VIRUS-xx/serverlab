@@ -4,7 +4,7 @@
 set -euo pipefail
 ID=$1
 case $ID in A-*) P=ag;; C-*|U-*) P=cp;; *) echo "task id must start with A- or C-"; exit 1;; esac
-ROOT=<repo>
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WT=$ROOT/../ServerLabs-wt/$ID
 cd "$ROOT"
 git config core.hooksPath .githooks

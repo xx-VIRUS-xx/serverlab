@@ -33,3 +33,7 @@ Worktrees have their own copies of `collab/`, which go stale. The single live co
 - Task `status: review`, and a one-line `review-request` appended to `collab/channel.md`.
 
 Full protocol: `COLLAB.md`.
+
+## Note for readers of this repository
+
+This file and `COLLAB.md` describe the review process used while building ServerLab (a lead agent plus implementation workers, with a task board in `collab/`). Paths written as `<repo>` stand for the repository root. The process files are kept as a record; you do not need them to use the tool.

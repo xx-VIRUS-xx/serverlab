@@ -1,6 +1,6 @@
 #!/bin/bash
 # Lead-side watcher: one line per change in the channel, agent branch tips, or task status on a branch.
-ROOT=<repo>
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 snap() {
