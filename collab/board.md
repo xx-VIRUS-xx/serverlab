@@ -32,5 +32,5 @@ Task detail: `collab/tasks/<ID>.md`.
 | A-6 | Week 4: pg_stat_activity collector | haiku-worker | merged | week4 plan approved | ag/A-6 |
 | C-7 | Week 4: app /metrics collector | haiku-worker | merged | C-6 | cp/C-7 |
 | U-1 | UI: results reader, SDK, server, jobs, tests | claude | merged | - | main |
-| U-2 | UI: single-file page | haiku-worker | ready | U-1 | cp/U-2 |
+| U-2 | UI: single-file page | haiku-worker | merged | U-1 | cp/U-2 |
 | L-13 | Week 4: calibration, predictions, main experiment, report | claude | blocked | all | main |

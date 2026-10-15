@@ -1,6 +1,6 @@
 # Phase plan: local UI + SDK + publish
 
-Status: **Approved 2026-10-15: public repository, MIT license, other defaults as written. Email is re-confirmed right before the push.**
+Status: **Approved 2026-10-15: public repository, MIT license, other defaults as written. Built and merged (U-1, U-2); README written; publishing waits for the Week 4 main run and the email confirmation.**
 Decision D-4 (owner): a simple interface that runs on the user's own machine, then publish the project. This overrides the V1 non-goal "no web dashboard" (plan.md s2); everything else in plan.md stands. Weeks 5-8 (concurrency model, Redis, bottleneck analyzer + HTML report, LLM serving) are **not built** and the README will list them as roadmap, not as features.
 
 ## 1. What the user gets
@@ -64,3 +64,10 @@ No editing of results; no accounts; no network calls.
 1. Port 8765, local only: OK?
 2. Single-file UI with no external assets: OK?
 3. Answers to section 6, or "use the defaults".
+
+## 8. Evidence
+
+- `uv run pytest -q tests/ui`: 12 passed (host guard, token on POST, path traversal, spec confinement, one job at a time, pasted-YAML validation, a real CLI job, results from earlier versions, SDK).
+- Real data: all 14 result folders in `results/` load through `GET /api/results/{experiment}/{timestamp}` (a worker found 11 returning HTTP 500 on the first version; fixed and covered by a regression test).
+- Headless-Chrome screenshots (dark theme, 1280 px) of the Results list, a sweep detail with charts, and a run detail with invalid reasons were inspected by the lead; the worker also checked light, dark and phone widths and the `#predictions` and `#results/<experiment>/<timestamp>` routes.
+- Not exercised against a live server: Run/Sweep confirmation, Cancel, Open-result button, inline 400/409 messages (no real jobs may run during an experiment).
