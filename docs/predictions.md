@@ -80,3 +80,17 @@ Main-run design, fixed now:
 - 3 sweeps per pool size, interleaved in the seeded randomized-block order; collectors on (container stats, app metrics, `pg_stat_activity`).
 - Secondary diagnostic, not graded: the plateau restricted to steps whose SUT container CPU median was below 85% (API not overloaded).
 - Stated in advance: if event-loop stalls on this host make the connection hold time longer than 50 ms, `C_meas` falls below `C_pool` and the pass rule can fail. That outcome would be reported as a miss, with the hold-time evidence, not adjusted.
+
+## Week 4 outcome (appended after the main run; everything above was committed before it)
+
+Run: `results/week4_pool/20261015T190907Z` (summaries in `docs/results/week4_pool/`), 15 interleaved sweeps (3 per pool size), command `serverlab sweep experiments/week4_pool.yaml`, graded with `serverlab analyze-pool ... --calibration results/week4_calibration/20261015T041012Z`. Environment warning on the run: host swap 13 002 MiB in use. No sweep step was classified `invalid-other`.
+
+| Pool size n | Predicted `C_pool` = n / 0.050 s | Measured plateau (median of 3 sweep medians) | Error | Regime / grade |
+|---|---|---|---|---|
+| 5  | 100  | 95   | -5.4%  | pool-limited: **PASS** |
+| 10 | 200  | 189  | -5.5%  | pool-limited: **PASS** |
+| 20 | 400  | 378  | -5.5%  | pool-limited: **PASS** |
+| 40 | 800  | 718  | -10.2% | pool-limited: **PASS** (within 15%; see caveat) |
+| 80 | 1600 | 1121 | -30.0% | ambiguous by construction: not graded |
+
+All four graded sizes passed the pre-committed 15% rule. Not graded and not claimed: pool 80.
