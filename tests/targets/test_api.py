@@ -128,7 +128,8 @@ def test_work_runs_pg_sleep_with_service_time_and_counts_ok() -> None:
         metrics = client.get("/metrics").json()
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
-    assert fake.executed == [("SELECT pg_sleep(%s)", (0.1,))]
+    # startup check first, then exactly one pg_sleep for the one /work request
+    assert fake.executed == [("SELECT 1", None), ("SELECT pg_sleep(%s)", (0.1,))]
     assert metrics["ok"] == 1 and metrics["errors"] == 0 and metrics["in_flight"] == 0
 
 
@@ -157,21 +158,34 @@ def test_healthz_is_503_before_pool_is_opened() -> None:
     assert not fake.opened
 
 
-def test_healthz_is_200_after_open_and_pool_closes_on_shutdown() -> None:
+def test_healthz_is_200_after_open_and_does_not_touch_the_pool() -> None:
     fake = FakePool()
     with _app(fake) as client:
         assert fake.opened
-        resp = client.get("/healthz")
-    assert resp.status_code == 200
-    assert fake.executed == [("SELECT 1", None)]  # /healthz uses SELECT 1, not pg_sleep
+        assert fake.executed == [("SELECT 1", None)]  # the single startup check
+        for _ in range(5):
+            assert client.get("/healthz").status_code == 200
+        assert fake.executed == [("SELECT 1", None)]  # healthz never borrows a connection
     assert fake.closed
 
 
-def test_healthz_is_503_when_select_1_fails() -> None:
-    fake = FakePool()
+def test_failed_startup_check_keeps_the_service_not_ready() -> None:
+    fake = FakePool(fail_with=psycopg.OperationalError("down"))
     with _app(fake) as client:
-        fake.fail_with = psycopg.OperationalError("down")
         assert client.get("/healthz").status_code == 503
+
+
+def test_metrics_fills_missing_pool_counters_with_zero() -> None:
+    class Sparse(FakePool):
+        def get_stats(self) -> dict[str, int]:
+            return {"pool_size": 2, "pool_available": 2, "requests_waiting": 0,
+                    "pool_min": 2, "pool_max": 2}
+
+    with _app(Sparse()) as client:
+        body = client.get("/metrics").json()
+    for key in ("requests_num", "requests_queued", "requests_wait_ms", "requests_wait_max"):
+        assert body[key] == 0
+    assert {"in_flight", "ok", "errors"} <= set(body)
 
 
 def _docker_available() -> bool:

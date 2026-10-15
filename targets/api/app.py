@@ -19,6 +19,10 @@ from psycopg_pool import AsyncConnectionPool
 
 DEFAULT_SERVICE_TIME_MS = 50
 DEFAULT_POOL_TIMEOUT_S = 30.0
+POOL_COUNTERS = (
+    "requests_num", "requests_queued", "requests_wait_ms", "requests_wait_max",
+    "pool_min", "pool_max", "pool_size", "pool_available", "requests_waiting",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +92,16 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await db_pool.open(wait=True)
-        state.ready = True
+        # One startup check. /healthz must NOT touch the pool afterwards: the compose
+        # healthcheck runs every second and would steal pool capacity and inflate the pool
+        # counters that the experiment measures.
+        try:
+            async with db_pool.connection() as conn:
+                cur = await conn.execute("SELECT 1")
+                await cur.fetchone()
+            state.ready = True
+        except Exception:
+            logger.warning("startup check failed; staying not ready", exc_info=True)
         try:
             yield
         finally:
@@ -117,18 +130,15 @@ def create_app(
     async def healthz() -> JSONResponse:
         if not state.ready:
             return JSONResponse({"status": "not ready"}, status_code=503)
-        try:
-            async with db_pool.connection() as conn:
-                cur = await conn.execute("SELECT 1")
-                await cur.fetchone()
-        except Exception:
-            logger.warning("health check failed", exc_info=True)
-            return JSONResponse({"status": "unhealthy"}, status_code=503)
         return JSONResponse({"status": "ok"})
 
     @app.get("/metrics")
     async def metrics() -> dict[str, Any]:
         body: dict[str, Any] = dict(db_pool.get_stats())
+        # psycopg_pool omits counters it has not touched yet (e.g. nothing has queued at low
+        # load). Fill them with 0 so the metrics contract is always complete.
+        for key in POOL_COUNTERS:
+            body.setdefault(key, 0)
         body["in_flight"] = state.in_flight
         body["ok"] = state.ok
         body["errors"] = state.errors

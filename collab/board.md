@@ -28,7 +28,7 @@ Task detail: `collab/tasks/<ID>.md`.
 | A-5 | Week 3: coarse + bracket sweep driver | haiku-worker | merged | L-9 | ag/A-5 |
 | L-10 | Week 3: sweep/validate CLI, k6 cgroup CPU | claude | merged | L-8, L-9, C-5, A-5 | main |
 | L-12 | Week 4: spec/compose/cpuset generalization, error gate, sweep repetitions, collector wiring | claude | blocked | week4 plan approved | main |
-| C-6 | Week 4: FastAPI + psycopg pool target with /metrics | haiku-worker | ready | week4 plan approved | cp/C-6 |
+| C-6 | Week 4: FastAPI + psycopg pool target with /metrics | haiku-worker | merged | week4 plan approved | cp/C-6 |
 | A-6 | Week 4: pg_stat_activity collector | haiku-worker | merged | week4 plan approved | ag/A-6 |
 | C-7 | Week 4: app /metrics collector | haiku-worker | merged | C-6 | cp/C-7 |
 | L-13 | Week 4: calibration, predictions, main experiment, report | claude | blocked | all | main |
