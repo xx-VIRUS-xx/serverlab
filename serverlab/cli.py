@@ -1,5 +1,6 @@
 """serverlab CLI."""
 
+import signal
 from pathlib import Path
 from typing import Annotated
 
@@ -24,6 +25,15 @@ from serverlab.metrics.overhead import OverheadInputError, analyse, load_inputs,
 
 app = typer.Typer(no_args_is_help=True, help="ServerLab experiment framework")
 
+
+def _terminate_as_interrupt() -> None:
+    """SIGTERM (UI cancel, `kill`) becomes KeyboardInterrupt so teardown runs."""
+
+    def handler(_signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handler)
+
 EXIT_ERROR = 2
 EXIT_INVALID_RUN = 3
 EXIT_INSUFFICIENT = 3
@@ -36,6 +46,7 @@ def run(
     dry_run: Annotated[bool, typer.Option(help="print the schedule and exit")] = False,
 ) -> None:
     """Run an experiment. Exit 3 if any run is invalid or errored (all artifacts still written)."""
+    _terminate_as_interrupt()
     try:
         experiment = load_experiment(spec)
         if dry_run:
@@ -119,6 +130,7 @@ def sweep(
     results: Annotated[Path, typer.Option(help="results root directory")] = Path("results"),
 ) -> None:
     """Coarse log-spaced sweep, then bracketed search for the knee, per condition."""
+    _terminate_as_interrupt()
     try:
         outcome = run_sweeps(
             load_experiment(spec), results, base_dir=spec.resolve().parent.parent,
@@ -215,6 +227,33 @@ def analyze_pool(
             )
     if any(v.passed is False for v in verdicts):
         raise typer.Exit(EXIT_INVALID_RUN)
+
+
+@app.command()
+def ui(
+    port: Annotated[int, typer.Option(help="port on 127.0.0.1")] = 8765,
+    root: Annotated[Path, typer.Option(help="project root with experiments/ results/ docs/")] = (
+        Path(".")
+    ),
+    open_browser: Annotated[bool, typer.Option("--open/--no-open")] = True,
+) -> None:
+    """Start the local web UI (loopback only)."""
+    try:
+        import uvicorn
+
+        from serverlab.ui.server import create_app
+    except ImportError as exc:  # pragma: no cover
+        typer.echo("the UI needs extras: pip install 'serverlab[ui]'", err=True)
+        raise typer.Exit(EXIT_ERROR) from exc
+    application = create_app(root, port=port)
+    url = f"http://127.0.0.1:{port}/"
+    typer.echo(f"serverlab UI on {url}  (local only; Ctrl+C to stop)")
+    if open_browser:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run(application, host="127.0.0.1", port=port, log_level="warning")
 
 
 @app.command()

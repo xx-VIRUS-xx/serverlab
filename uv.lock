@@ -546,6 +546,12 @@ dependencies = [
     { name = "typer" },
 ]
 
+[package.optional-dependencies]
+ui = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "fastapi" },
@@ -561,13 +567,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", marker = "extra == 'ui'", specifier = ">=0.143.1" },
     { name = "hdrhistogram", specifier = ">=0.10" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", marker = "extra == 'ui'", specifier = ">=0.54.0" },
 ]
+provides-extras = ["ui"]
 
 [package.metadata.requires-dev]
 dev = [
