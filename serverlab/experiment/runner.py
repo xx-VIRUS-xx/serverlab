@@ -25,7 +25,9 @@ from serverlab.experiment.spec import ExperimentSpec, RunSpec
 from serverlab.load.base import RunResult
 from serverlab.load.hdr import build_hdr_from_json, write_hdr
 from serverlab.load.k6 import ContainerExec, K6Adapter
+from serverlab.metrics.app_metrics import AppMetricsCollector
 from serverlab.metrics.collector import DockerStatsCollector
+from serverlab.metrics.pg_activity import PgActivityCollector
 from serverlab.topology.compose import render_compose
 from serverlab.topology.cpuset import CpuAssignment, assign_cpusets
 
@@ -53,10 +55,25 @@ CollectorsFactory = Callable[[CollectorContext], list[NamedCollector]]
 
 def default_collectors(ctx: CollectorContext) -> list[NamedCollector]:
     """Container stats for the SUT and every extra service. Always out-of-band, host side."""
-    names = ["sut", *(s.name for s in ctx.spec.target.services)]
+    spec = ctx.spec
+    names = ["sut", *(s.name for s in spec.target.services)]
     containers = [f"{ctx.project}-{n}-1" for n in names]
-    return [("docker", DockerStatsCollector(interval_s=ctx.spec.metrics.interval_s,
-                                            containers=containers))]
+    out: list[NamedCollector] = [
+        ("docker", DockerStatsCollector(interval_s=spec.metrics.interval_s, containers=containers))
+    ]
+    if spec.metrics.app_metrics_path is not None:
+        if spec.target.publish is None:
+            raise RunnerError("metrics.app_metrics_path needs target.publish (a host port)")
+        url = f"http://127.0.0.1:{spec.target.publish}{spec.metrics.app_metrics_path}"
+        out.append(("app", AppMetricsCollector(url, interval_s=spec.metrics.interval_s)))
+    if spec.metrics.pg_service is not None:
+        svc = next((s for s in spec.target.services if s.name == spec.metrics.pg_service), None)
+        if svc is None or svc.publish is None:
+            raise RunnerError(f"pg_service {spec.metrics.pg_service!r} must be a published service")
+        password = svc.env.get("POSTGRES_PASSWORD", "")
+        dsn = f"postgresql://postgres:{password}@127.0.0.1:{svc.publish}/postgres"
+        out.append(("pg", PgActivityCollector(dsn, interval_s=spec.metrics.interval_s)))
+    return out
 
 
 def build_hdr_file(ndjson: Path, out: Path) -> dict[str, int]:

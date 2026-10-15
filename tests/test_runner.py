@@ -206,3 +206,35 @@ def test_per_condition_metrics_override(tmp_path: Path) -> None:
     FakeCollector.started, FakeCollector.contexts = [], []
     _run(tmp_path, spec, collectors_factory=fake_factory)
     assert FakeCollector.started == ["run_on_1"]
+
+
+def _db_spec(**metrics: object) -> ExperimentSpec:
+    return _spec(
+        1,
+        target={
+            "image": SUT, "publish": 58000,
+            "services": [{"name": "db", "image": "postgres@sha256:" + "d" * 64,
+                          "env": {"POSTGRES_PASSWORD": "pw"}, "container_port": 5432,
+                          "publish": 55432}],
+        },
+        cpus={"sut": [0], "load": [1], "services": {"db": [2]}},
+        metrics={"app_metrics_path": "/metrics", "pg_service": "db", **metrics},
+    )
+
+
+def test_default_collectors_cover_stack_app_and_postgres() -> None:
+    spec = _db_spec()
+    ctx = CollectorContext(spec, "proj-x", "run_A_1", "A")
+    got = {name: c for name, c in runner.default_collectors(ctx)}
+    assert list(got) == ["docker", "app", "pg"]
+    assert got["docker"]._argv[-2:] == ["proj-x-sut-1", "proj-x-db-1"]  # type: ignore[attr-defined]
+    assert got["app"]._url == "http://127.0.0.1:58000/metrics"  # type: ignore[attr-defined]
+    assert got["pg"]._dsn == "postgresql://postgres:pw@127.0.0.1:55432/postgres"  # type: ignore[attr-defined]
+
+
+def test_app_metrics_without_a_published_port_is_a_loud_error() -> None:
+    base = _db_spec().model_dump(mode="json")
+    base["target"]["publish"] = None
+    spec = ExperimentSpec.model_validate(base)
+    with pytest.raises(runner.RunnerError, match="needs target.publish"):
+        runner.default_collectors(CollectorContext(spec, "p", "r", "A"))
