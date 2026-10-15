@@ -49,3 +49,19 @@ Procedure change, declared now and before any pool-size data exists:
 2. The calibration pool is 160 instead of 400 (`C_pool` = 3200 req/s, still above the top of the sweep range), to cut Postgres memory.
 3. The calibration is repeated exactly once, same procedure (3 sweeps, `A` = median estimate). No further calibration reruns to improve `A`.
 4. If the three estimates of the repeat differ by more than 1.5x (max/min), `A` is reported as the interval [min, max], and for pool sizes where `C_pool` exceeds `A_lo` the prediction becomes the interval [min(C_pool, A_lo), min(C_pool, A_hi)]; the pass rule is then "measured knee within 15% of any value in that interval". Predictions for pool sizes whose `C_pool` is below `A_lo` are unchanged.
+
+### Week 4 amendment 2: resource-based estimators (committed before the calibration rerun and before any pool-size data)
+
+Reason: calibration run 1 showed the p99-onset knee is unreliable on this host (estimates 281-737 req/s for one system; the API container was at ~50% CPU where the knee was "found"), because swap stalls inflate p99 at random steps. Two estimators that average over thousands of requests and do not depend on p99 are declared as primary. The p99 knee is still computed and reported as secondary, with its noise.
+
+**Estimator 1, API ceiling `A` (utilization law).** From valid steps with offered rate <= 975 req/s of the calibration sweeps, fit `SUT_CPU_us_per_s = F + d * req_per_s` (least squares, per-step values from the SUT cgroup `usage_usec` and the k6 wall time as the window). `A = (1e6 - F) / d` for one CPU. The interval is the 95% percentile bootstrap over steps (10 000 resamples, seeded). *Exploratory check on the run-1 data only (not used as `A`):* `F` = 20.6% of a CPU, `d` = 504 us/request, `A` = 1577 req/s, interval [1413, 1741] (27 steps, R^2 0.87).
+
+**Estimator 2, pool capacity `C_meas(n)` (Little's law at saturation).** From the app metrics of each pool-size sweep, take every 1-second interval with `pool_available == 0`, `requests_waiting > 0` and no counter reset; `C_meas` for that sweep is the median of `delta_ok / interval_s_actual` over those intervals. One value per sweep repetition; per pool size report the three values, their median and range. Prediction `C_pool(n) = n / 0.050` unchanged.
+
+**Amended pass rule (replaces the "measured knee within 15%" rule; everything else in this section stands):**
+1. Pool-limited sizes (predicted `C_pool(n) < A_lo`, the lower interval end): pass if the median `C_meas(n)` is within 15% of `C_pool(n)`.
+2. Sizes with `C_pool(n)` above `A_hi`: predicted API-limited. Pass if the pool never saturates in the sweeps' valid steps (pool_available > 0) and the SUT container CPU reaches >= 90% of its CPU where latency inflates. No numeric knee match is claimed.
+3. Sizes whose `C_pool(n)` lies inside [A_lo, A_hi] are reported as "ambiguous by construction" and are not graded.
+4. The secondary p99 knee per sweep is reported next to each, with its spread; it is not graded.
+
+The interval-prediction procedure from the first addendum (rerun calibration once, pool 160, same procedure) still applies; `A` is taken from the rerun, not run 1. Both are reported.

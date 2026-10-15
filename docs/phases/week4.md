@@ -81,6 +81,9 @@ Unit: topology with 3 sets (overlap/oversubscription rejected), compose with a D
 4. Pass tolerance 15% around `min(C_pool, A)`?
 5. The error-rate gate (<= 1%) added to the knee definition now?
 
+## 9a. Amendment after calibration run 1 (see docs/predictions.md)
+Primary estimators changed from the p99-onset knee to (1) the utilization-law API ceiling and (2) the saturated-interval pool throughput plateau; the p99 knee is kept as a secondary, reported, ungraded number. Declared before the calibration rerun and before any pool-size data.
+
 ## 10. Deviations
 - `max_connections` is 500, not 300: the calibration pool is 400 and must never be refused by Postgres.
 - `/healthz` runs one `SELECT 1` at startup and never borrows a pooled connection afterwards (the compose healthcheck would otherwise steal pool capacity every second); `/metrics` zero-fills psycopg_pool counters that were never touched so the collector contract is complete at low load. Both were gaps in my spec, found by checking the worker's real `/metrics` output.
