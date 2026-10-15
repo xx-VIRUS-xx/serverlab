@@ -7,9 +7,10 @@ Source: `plan.md` s6 Week 4. Locked decisions s3.1-3.12 apply. The thesis this e
 
 1. A FastAPI target (`targets/api/`) with a configurable DB pool whose endpoint holds one connection for a controlled DB service time.
 2. A topology with three disjoint CPU sets: API, Postgres, k6.
-3. Out-of-band collection of (a) app pool metrics and (b) `pg_stat_activity` wait events.
-4. Predictions committed first, then the experiment: knee per pool size in {5, 10, 20, 40, 80}, interleaved and repeated.
-5. Report: measured vs predicted knee per pool size with error, pool-wait and DB wait events at the knee.
+3. Environment capture gains power source, Low Power Mode and the list of other running containers.
+4. Out-of-band collection of (a) app pool metrics and (b) `pg_stat_activity` wait events.
+5. Predictions committed first, then the experiment: knee per pool size in {5, 10, 20, 40, 80}, interleaved and repeated.
+6. Report: measured vs predicted knee per pool size with error, pool-wait and DB wait events at the knee.
 
 Out of scope: process-count variation (Week 5), Redis (Week 6), HTML report (Week 7).
 
@@ -65,7 +66,7 @@ Unit: topology with 3 sets (overlap/oversubscription rejected), compose with a D
 
 | Risk | Handling |
 |---|---|
-| Docker Desktop VM cannot pin CPUs reliably and has 4 CPUs | Everything is built and run on the Mac for correctness only, tagged not-comparable. **No finding is published from the Mac.** The canonical run needs the Linux host. |
+| Docker Desktop VM cannot pin CPUs reliably and has 4 CPUs | **Decision: the experiment runs on this Mac.** Findings are valid only as relative results on this host and session, tagged `not-cross-machine-comparable`; no absolute capacity claims. The calibration step measures the API ceiling under the same conditions, so predictions account for it. Controls: other containers on the Docker VM stopped (or recorded), laptop plugged in, Low Power Mode off, power/thermal state recorded in `environment.json`, interleaved repetitions. A Linux host can repeat it later. |
 | API ceiling `A` is low and masks the larger pools | Expected and planned for: it is the "bottleneck moves" result, predicted and tested, not a failure |
 | `pg_sleep` is unrealistic | Stated limitation; real-query variant is backlog |
 | Collectors perturb the system | Re-run the Week 2 overhead check with both collectors on; report the number |
@@ -74,7 +75,7 @@ Unit: topology with 3 sets (overlap/oversubscription rejected), compose with a D
 
 ## 9. Open questions (defaults apply if you say "go")
 
-1. **Linux host:** is there a VM I can use for the canonical run (provider, cores)? Default: build and verify on the Mac, run the publishable experiment later; the Mac numbers are labelled dev-only.
+1. **Linux host:** none available, so the experiment runs on this Mac (decided). Results are labelled as same-host relative findings. Please stop the other Docker containers during runs.
 2. DB service time 50 ms via `pg_sleep`, API workers = 1, `max_connections` = 300?
 3. Repetitions per pool size: 3?
 4. Pass tolerance 15% around `min(C_pool, A)`?
