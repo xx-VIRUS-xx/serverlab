@@ -79,16 +79,26 @@ _ENV_KEYS = (
 )
 
 
-def _run_row(rec: dict[str, Any], metrics_dir: Path) -> dict[str, Any]:
+def _run_row(
+    rec: dict[str, Any], metrics_dir: Path, default_rate: int | None = None
+) -> dict[str, Any]:
+    """One run. Results written by earlier versions lack some fields; those become None
+    (shown as n/a), never a made-up value. `offered_rate` falls back to the spec's load rate
+    only for single-rate experiments, where it is the same for every run."""
     res = rec["result"]
     rid = res["run_id"]
+    lat = res.get("latency_ms") or {}
     return {
-        "run_id": rid, "condition": rec["condition"], "repetition": rec["repetition"],
-        "index": rec["index"], "offered_rate": rec["offered_rate"], "valid": res["valid"],
-        "invalid_reasons": res["invalid_reasons"], "planned": res["planned"],
-        "completed": res["completed"], "dropped": res["dropped"], "peak_vus": res["peak_vus"],
-        "p50_ms": res["latency_ms"]["p50"], "p90_ms": res["latency_ms"]["p90"],
-        "p99_ms": res["latency_ms"]["p99"], "error_rate": res["error_rate"],
+        "run_id": rid, "condition": rec.get("condition"), "repetition": rec.get("repetition"),
+        "index": rec.get("index"),
+        "offered_rate": rec["offered_rate"] if rec.get("offered_rate") is not None
+        else default_rate,
+        "valid": res["valid"],
+        "invalid_reasons": res.get("invalid_reasons", []), "planned": res.get("planned"),
+        "completed": res.get("completed"), "dropped": res.get("dropped"),
+        "peak_vus": res.get("peak_vus"),
+        "p50_ms": lat.get("p50"), "p90_ms": lat.get("p90"),
+        "p99_ms": lat.get("p99"), "error_rate": res.get("error_rate"),
         "sut_cpu_usec": rec.get("sut_cpu_usec"), "k6_cpu_usec": res.get("k6_cpu_usec"),
         "metrics": [k for k, suf in METRIC_SUFFIX.items()
                     if (metrics_dir / f"{rid}{suf}.jsonl").is_file()],
@@ -108,7 +118,8 @@ def _sweep_row(data: dict[str, Any]) -> dict[str, Any]:
             "invalid_reasons": m["invalid_reasons"],
         })
     return {
-        "condition": data["condition"], "repetition": data["repetition"], "seed": data["seed"],
+        "condition": data["condition"], "repetition": data.get("repetition"),
+        "seed": data.get("seed"),
         "coarse_order": sweep["coarse_order"], "bisect_rates": sweep["bisect_rates"],
         "steps": steps,
         "knee": {k: knee.get(k) for k in
@@ -131,21 +142,26 @@ def result_summary(root: Path, experiment: str, timestamp: str) -> dict[str, Any
         "experiment": experiment, "timestamp": timestamp,
         "kind": "sweep" if sweeps else "run",
         "spec": {
-            "name": spec["name"], "seed": spec["seed"], "repetitions": spec.get("repetitions"),
+            "name": spec.get("name"), "seed": spec.get("seed"),
+            "repetitions": spec.get("repetitions"),
             "conditions": [
                 {"name": c["name"], "target_env": c.get("target_env", {}),
-                 "load_rate": c.get("load_rate")} for c in spec["conditions"]
+                 "load_rate": c.get("load_rate")} for c in spec.get("conditions", [])
             ],
-            "load": {"rate": spec["load"]["rate"], "duration_s": spec["load"]["duration_s"]},
-            "cpus": spec["cpus"],
+            "load": {"rate": spec.get("load", {}).get("rate"),
+                     "duration_s": spec.get("load", {}).get("duration_s")},
+            "cpus": spec.get("cpus"),
         },
         "environment": {k: env.get(k) for k in _ENV_KEYS},
         "schedule": None if sched is None else {
-            "method": sched["method"], "seed": sched["seed"],
-            "order": [{"index": r["index"], "condition": r["condition"],
-                       "repetition": r["repetition"]} for r in sched["runs"]],
+            "method": sched.get("method"), "seed": sched.get("seed"),
+            "order": [{"index": r.get("index"), "condition": r.get("condition"),
+                       "repetition": r.get("repetition")} for r in sched.get("runs", [])],
         },
-        "runs": [_run_row(_json(f), d / "metrics") for f in _run_files(d)],
+        "runs": [
+            _run_row(_json(f), d / "metrics", spec.get("load", {}).get("rate"))
+            for f in _run_files(d)
+        ],
         "errors": errors,
         "sweeps": [_sweep_row(_json(p)) for p in sweeps],
     }

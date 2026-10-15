@@ -1,5 +1,6 @@
 """UI server and SDK on hermetic result directories built with the test fakes (no Docker/k6)."""
 
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -186,3 +187,32 @@ def test_sdk_reads_the_same_results(root: Path) -> None:
     row = lab.results()[1]
     assert len(lab.result(row["experiment"], row["timestamp"])["runs"]) == 4
     assert yaml.safe_load(Lab.dump_spec(spec))["name"] == "unit"
+
+
+def test_results_from_earlier_versions_load_with_missing_fields_as_none(tmp_path: Path) -> None:
+    """Weeks 1-3 wrote records without offered_rate/repetition/index and specs without
+    conditions. They must load, with unknown fields as None (never invented)."""
+    d = tmp_path / "results" / "old" / "20260101T000000Z"
+    (d / "raw").mkdir(parents=True)
+    (d / "environment.json").write_text(
+        json.dumps({"comparability": "not-cross-machine-comparable"})
+    )
+    (d / "spec.yaml").write_text(yaml.safe_dump({
+        "name": "old", "seed": 1, "load": {"rate": 50, "duration_s": 20}, "cpus": {"sut": [0]},
+    }))
+    rec = {"experiment": "old", "condition": "main", "result": {
+        "run_id": "run_main_1", "planned": 1000, "completed": 1000, "dropped": 0, "peak_vus": 5,
+        "latency_ms": {"p50": 1.0, "p90": 2.0, "p99": 3.0, "max": 4.0}, "error_rate": 0.0,
+        "valid": True, "invalid_reasons": [],
+    }}
+    (d / "raw" / "run_main_1.json").write_text(json.dumps(rec))
+    sweep = {"condition": "main", "sweep": {"steps": [], "coarse_order": [], "bisect_rates": [],
+             "knee": {"status": "above_range"}}, "records": []}
+    (d / "sweep_main.json").write_text(json.dumps(sweep))
+    c = client(tmp_path)
+    assert c.get("/api/results").json()[0]["runs"] == 1
+    s = c.get("/api/results/old/20260101T000000Z").json()
+    run = s["runs"][0]
+    assert run["offered_rate"] == 50  # single-rate spec: the spec's rate is the run's rate
+    assert run["repetition"] is None and run["index"] is None and run["sut_cpu_usec"] is None
+    assert s["spec"]["conditions"] == [] and s["sweeps"][0]["repetition"] is None
