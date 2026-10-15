@@ -82,7 +82,10 @@ Unit: topology with 3 sets (overlap/oversubscription rejected), compose with a D
 5. The error-rate gate (<= 1%) added to the knee definition now?
 
 ## 10. Deviations
-(none yet)
+- `max_connections` is 500, not 300: the calibration pool is 400 and must never be refused by Postgres.
+- `/healthz` runs one `SELECT 1` at startup and never borrows a pooled connection afterwards (the compose healthcheck would otherwise steal pool capacity every second); `/metrics` zero-fills psycopg_pool counters that were never touched so the collector contract is complete at low load. Both were gaps in my spec, found by checking the worker's real `/metrics` output.
+- Calibration uses 3 repetitions of one condition; `A` is the median estimate.
+- One plumbing sweep (`experiments/week4_smoke.yaml`, pool 10, 4 coarse steps) was run to verify collectors and topology before the calibration. It is not part of the evidence.
 
 ## 11. Evidence
 (filled after implementation)

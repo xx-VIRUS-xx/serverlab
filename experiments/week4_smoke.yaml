@@ -1,0 +1,44 @@
+# Plumbing check for the API + Postgres stack only (collectors, topology, sweep). Not calibration.
+name: week4_smoke
+seed: 1
+repetitions: 1
+conditions:
+  - name: pool-10
+    target_env: {POOL_SIZE: "10"}
+target:
+  image: serverlab-api
+  build_context: .
+  dockerfile: targets/api/Dockerfile
+  env:
+    DATABASE_URL: postgresql://postgres:bench@db:5432/postgres
+    SERVICE_TIME_MS: "50"
+    POOL_TIMEOUT_S: "30"
+  port: 8000
+  publish: 58000
+  services:
+    - name: db
+      image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+      env: {POSTGRES_PASSWORD: bench}
+      command: [postgres, -c, max_connections=500]
+      tmpfs: [/var/lib/postgresql/data]
+      healthcheck: [CMD-SHELL, "pg_isready -U postgres"]
+      container_port: 5432
+      publish: 55432
+k6_image: grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+load:
+  rate: 50
+  duration_s: 6
+  pre_allocated_vus: 200
+  max_vus: 3000
+  url: http://sut:8000/work
+cpus: {sut: [0], load: [3], services: {db: [1, 2]}}
+warmup_s: 2
+cooldown_s: 0
+metrics: {enabled: true, interval_s: 1.0, app_metrics_path: /metrics, pg_service: db}
+sweep:
+  rate_lo: 50
+  rate_hi: 400
+  step_duration_s: 6
+  step_warmup_s: 2
+  coarse_points: 4
+  max_bisect: 0

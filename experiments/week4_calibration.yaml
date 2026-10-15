@@ -1,0 +1,46 @@
+# Calibration: API ceiling A on this host. Pool 400 is never the limiter (C_pool = 8000 req/s),
+# so the knee found here is the API's own ceiling. Same stack, topology and controls as the main run.
+name: week4_calibration
+seed: 20261015
+repetitions: 3
+conditions:
+  - name: pool-400
+    target_env: {POOL_SIZE: "400"}
+target:
+  image: serverlab-api
+  build_context: .
+  dockerfile: targets/api/Dockerfile
+  env:
+    DATABASE_URL: postgresql://postgres:bench@db:5432/postgres
+    SERVICE_TIME_MS: "50"
+    POOL_TIMEOUT_S: "30"
+  port: 8000
+  publish: 58000
+  services:
+    - name: db
+      image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+      env: {POSTGRES_PASSWORD: bench}
+      command: [postgres, -c, max_connections=500]
+      tmpfs: [/var/lib/postgresql/data]
+      healthcheck: [CMD-SHELL, "pg_isready -U postgres"]
+      container_port: 5432
+      publish: 55432
+k6_image: grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+load:
+  rate: 50
+  duration_s: 10
+  pre_allocated_vus: 400
+  max_vus: 5000
+  url: http://sut:8000/work
+cpus: {sut: [0], load: [3], services: {db: [1, 2]}}
+warmup_s: 2
+cooldown_s: 0
+metrics: {enabled: true, interval_s: 1.0, app_metrics_path: /metrics, pg_service: db}
+sweep:
+  rate_lo: 50
+  rate_hi: 3200
+  step_duration_s: 10
+  step_warmup_s: 2
+  coarse_points: 8
+  max_bisect: 6
+  width_target_pct: 5.0
