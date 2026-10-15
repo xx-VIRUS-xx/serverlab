@@ -1,6 +1,6 @@
 # Week 4 phase plan: Experiment 1, DB connection pool
 
-Status: **DRAFT, awaiting human approval. No Week 4 code exists.**
+Status: **Approved 2026-10-15 with the defaults in section 9; other Docker containers stopped by the owner's instruction. In progress.**
 Source: `plan.md` s6 Week 4. Locked decisions s3.1-3.12 apply. The thesis this experiment tests: *with a fixed API, the knee of a DB-bound endpoint is set by pool_size / DB service time (Little's law), until another resource saturates first.*
 
 ## 1. Scope
