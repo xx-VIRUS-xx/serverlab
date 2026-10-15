@@ -3,7 +3,7 @@
 # Creates (or refreshes) ../ServerLabs-wt/<ID> on branch ag/<ID> or cp/<ID>, syncs deps, ensures hooks.
 set -euo pipefail
 ID=$1
-case $ID in A-*) P=ag;; C-*) P=cp;; *) echo "task id must start with A- or C-"; exit 1;; esac
+case $ID in A-*) P=ag;; C-*|U-*) P=cp;; *) echo "task id must start with A- or C-"; exit 1;; esac
 ROOT=<repo>
 WT=$ROOT/../ServerLabs-wt/$ID
 cd "$ROOT"
