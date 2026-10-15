@@ -49,6 +49,7 @@ LINUX_ANSWERS: dict[tuple[str, ...], CommandResult] = {
     ("docker", "info", "--format", "{{.MemTotal}}"): ok("8589934592"),
     ("k6", "version"): ok("k6 v0.52.0 (go1.22.2, linux/amd64)"),
     ("git", "-C", "/exp", "rev-parse", "HEAD"): ok(SHA),
+    ("docker", "ps", "--format", "{{.Names}}"): ok(""),
 }
 
 LINUX_FILES: dict[str, str] = {
@@ -97,7 +98,9 @@ def test_linux_native_docker_is_canonical() -> None:
     assert info.git_sha == SHA
     assert info.cpu_pinning_reliable is True
     assert info.comparability == "canonical"
-    assert info.reasons == {}
+    # only the macOS-only probes are null on a canonical Linux host, each with its reason
+    assert set(info.reasons) == {"power_source", "low_power_mode", "thermal_cpu_speed_limit_pct"}
+    assert info.other_running_containers == []
 
 
 def test_macos_forces_unreliable_pinning_and_not_comparable() -> None:
@@ -214,3 +217,44 @@ def test_json_round_trip() -> None:
     )
     restored = EnvironmentInfo.model_validate_json(info.model_dump_json())
     assert restored == info
+
+
+def _mac_env(extra: dict[tuple[str, ...], CommandResult]) -> EnvironmentInfo:
+    return capture_environment(
+        host_system="Darwin", experiment_dir=Path("/exp"),
+        runner=make_runner({**MAC_ANSWERS, **extra}), read_text=make_reader({}),
+    )
+
+
+def test_mac_power_thermal_and_other_containers_captured() -> None:
+    env = _mac_env({
+        ("pmset", "-g", "batt"): ok("Now drawing from 'AC Power'\n -InternalBattery-0 100%"),
+        ("pmset", "-g"): ok("System-wide power settings:\n lowpowermode         0\n sleep 1"),
+        ("pmset", "-g", "therm"): ok("Note: No thermal warning level has been recorded"),
+        ("docker", "ps", "--format", "{{.Names}}"): ok("phielia-pg\nserverlab-x-sut-1\nredis"),
+    })
+    assert env.power_source == "AC Power" and env.low_power_mode is False
+    assert env.thermal_cpu_speed_limit_pct is None
+    assert "No thermal warning" in env.reasons["thermal_cpu_speed_limit_pct"]
+    assert env.other_running_containers == ["phielia-pg", "redis"]  # our own stack excluded
+
+
+def test_mac_low_power_battery_and_speed_limit_parsed() -> None:
+    env = _mac_env({
+        ("pmset", "-g", "batt"): ok("Now drawing from 'Battery Power'"),
+        ("pmset", "-g"): ok(" lowpowermode         1"),
+        ("pmset", "-g", "therm"): ok("CPU_Scheduler_Limit = 100\nCPU_Speed_Limit     = 75"),
+        ("docker", "ps", "--format", "{{.Names}}"): ok(""),
+    })
+    assert env.power_source == "Battery Power" and env.low_power_mode is True
+    assert env.thermal_cpu_speed_limit_pct == 75 and env.other_running_containers == []
+
+
+def test_linux_has_null_mac_probes_with_reasons_and_failed_docker_is_null() -> None:
+    env = capture_environment(
+        host_system="Linux", experiment_dir=Path("/exp"),
+        runner=make_runner(LINUX_ANSWERS), read_text=make_reader(LINUX_FILES),
+    )
+    for name in ("power_source", "low_power_mode", "thermal_cpu_speed_limit_pct"):
+        assert getattr(env, name) is None and "macOS only" in env.reasons[name]
+    assert env.other_running_containers is None and env.reasons["other_running_containers"]

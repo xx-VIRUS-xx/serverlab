@@ -1,5 +1,6 @@
 """Sweep wiring with Docker and the load adapter faked: clean stack per step, errors kept."""
 
+import json
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,7 +17,7 @@ CAP = 100
 
 def _spec() -> ExperimentSpec:
     return ExperimentSpec.model_validate({
-        "name": "sw", "seed": 5, "repetitions": 1, "target": {"image": SUT}, "k6_image": K6,
+        "name": "sw", "seed": 5, "repetitions": 2, "target": {"image": SUT}, "k6_image": K6,
         "load": {"rate": 10, "duration_s": 5, "pre_allocated_vus": 2, "max_vus": 5,
                  "url": "http://sut:8000/w"},
         "cpus": {"sut": [0], "load": [1]}, "metrics": {"enabled": False},
@@ -61,14 +62,20 @@ def test_sweep_finds_known_capacity_per_condition_with_fresh_stacks(tmp_path: Pa
     docker, adapter = Docker(), Adapter()
     out = run_sweeps(_spec(), tmp_path, base_dir=tmp_path, cmd=docker, hdr_builder=None,
                      sleep=lambda _s: None, adapter_factory=lambda _c: adapter)
-    assert [c.condition for c in out.conditions] == ["c1", "c2"]
-    assert [c.seed for c in out.conditions] == [5, 6]
+    sched = json.loads((out.result_dir / "schedule.json").read_text())
+    assert [(c.condition, c.repetition) for c in out.conditions] == [
+        (r["condition"], r["repetition"]) for r in sched["runs"]
+    ]
+    assert sorted(c.condition for c in out.conditions) == ["c1", "c1", "c2", "c2"]
+    assert len({c.seed for c in out.conditions}) == 4
     for cs in out.conditions:
         knee = cs.sweep.knee
         assert knee.status == "found" and knee.lo is not None and knee.hi is not None
         assert knee.lo <= CAP <= knee.hi
         assert len(cs.records) == len(cs.sweep.steps)
-        assert (out.result_dir / f"sweep_{cs.condition}.json").is_file()
+        assert (out.result_dir / f"sweep_{cs.condition}_{cs.repetition}.json").is_file()
+    all_ids = [r.result.run_id for c in out.conditions for r in c.records]
+    assert len(all_ids) == len(set(all_ids))  # run ids stay unique across repetitions
     ups = [c for c in docker.calls if "up" in c]
     assert len(ups) == sum(len(c.records) for c in out.conditions)  # one fresh stack per step
     assert len([c for c in docker.calls if "down" in c]) == len(ups)

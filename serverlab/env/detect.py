@@ -75,6 +75,10 @@ NULLABLE_FIELDS: tuple[str, ...] = (
     "k6_version",
     "cpu_allocation",
     "git_sha",
+    "power_source",
+    "low_power_mode",
+    "thermal_cpu_speed_limit_pct",
+    "other_running_containers",
 )
 
 
@@ -96,6 +100,15 @@ class EnvironmentInfo(BaseModel):
     k6_version: str | None = None
     cpu_allocation: dict[str, list[int]] | None = None
     git_sha: str | None = None
+    power_source: str | None = Field(default=None, description="macOS: 'AC Power' or battery")
+    low_power_mode: bool | None = Field(default=None, description="macOS Low Power Mode")
+    thermal_cpu_speed_limit_pct: int | None = Field(
+        default=None, description="macOS pmset CPU_Speed_Limit; null + reason if none recorded"
+    )
+    other_running_containers: list[str] | None = Field(
+        default=None,
+        description="containers running at capture time that are not part of this experiment",
+    )
     cpu_pinning_reliable: bool
     comparability: Literal["canonical", "not-cross-machine-comparable"]
     reasons: dict[str, str] = Field(
@@ -215,6 +228,50 @@ def _k6_version(runner: CommandRunner) -> tuple[str | None, str | None]:
     return match.group(1), None
 
 
+def _power_source(system: str, runner: CommandRunner) -> tuple[str | None, str | None]:
+    if system != "Darwin":
+        return None, f"power source probe is macOS only; not applicable on {system!r}"
+    text, reason = _run_probe(runner, ["pmset", "-g", "batt"])
+    if text is None:
+        return None, reason
+    match = re.search(r"Now drawing from '([^']+)'", text)
+    if match is None:
+        return None, f"unrecognised pmset batt output: {text[:80]!r}"
+    return match.group(1), None
+
+
+def _low_power_mode(system: str, runner: CommandRunner) -> tuple[bool | None, str | None]:
+    if system != "Darwin":
+        return None, f"Low Power Mode probe is macOS only; not applicable on {system!r}"
+    text, reason = _run_probe(runner, ["pmset", "-g"])
+    if text is None:
+        return None, reason
+    match = re.search(r"^\s*lowpowermode\s+(\d)\s*$", text, re.MULTILINE)
+    if match is None:
+        return None, "no lowpowermode line in pmset -g output"
+    return match.group(1) == "1", None
+
+
+def _thermal_limit(system: str, runner: CommandRunner) -> tuple[int | None, str | None]:
+    if system != "Darwin":
+        return None, f"thermal probe is macOS only; not applicable on {system!r}"
+    text, reason = _run_probe(runner, ["pmset", "-g", "therm"])
+    if text is None:
+        return None, reason
+    match = re.search(r"CPU_Speed_Limit\s*=\s*(\d+)", text)
+    if match is None:
+        return None, f"pmset reports no CPU speed limit: {text.splitlines()[0][:100]!r}"
+    return int(match.group(1)), None
+
+
+def _other_containers(runner: CommandRunner) -> tuple[list[str] | None, str | None]:
+    result = runner(["docker", "ps", "--format", "{{.Names}}"])
+    if not result.ok:
+        return None, result.error or "docker ps failed"
+    names = [n.strip() for n in result.stdout.splitlines() if n.strip()]
+    return [n for n in names if not n.startswith("serverlab-")], None
+
+
 def _pinning(
     host_system: str, docker_os: str | None, docker_os_reason: str | None
 ) -> tuple[bool, str | None]:
@@ -285,6 +342,11 @@ def capture_environment(
     experiment = Path.cwd() if experiment_dir is None else experiment_dir
     git_sha = _take(reasons, "git_sha", _git_sha(runner, experiment))
 
+    power_source = _take(reasons, "power_source", _power_source(system, runner))
+    low_power_mode = _take(reasons, "low_power_mode", _low_power_mode(system, runner))
+    thermal_limit = _take(reasons, "thermal_cpu_speed_limit_pct", _thermal_limit(system, runner))
+    other_containers = _take(reasons, "other_running_containers", _other_containers(runner))
+
     reliable, pinning_reason = _pinning(system, docker_os, docker_os_pair[1])
     if pinning_reason is not None:
         reasons["cpu_pinning_reliable"] = pinning_reason
@@ -310,6 +372,10 @@ def capture_environment(
         k6_version=k6_version,
         cpu_allocation=allocation,
         git_sha=git_sha,
+        power_source=power_source,
+        low_power_mode=low_power_mode,
+        thermal_cpu_speed_limit_pct=thermal_limit,
+        other_running_containers=other_containers,
         cpu_pinning_reliable=reliable,
         comparability=comparability,
         reasons=reasons,

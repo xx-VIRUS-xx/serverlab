@@ -11,7 +11,12 @@ from serverlab.analysis.validate import (
     knee_checks,
     predicted_capacity,
 )
-from serverlab.experiment.runner import RunnerError, plan_schedule, run_experiment
+from serverlab.experiment.runner import (
+    RunnerError,
+    default_collectors,
+    plan_schedule,
+    run_experiment,
+)
 from serverlab.experiment.spec import load_experiment
 from serverlab.experiment.sweeps import SweepOutcome, run_sweeps
 from serverlab.metrics.overhead import OverheadInputError, analyse, load_inputs, render
@@ -85,7 +90,10 @@ def overhead(
 def _print_sweep(outcome: SweepOutcome) -> None:
     for cs in outcome.conditions:
         k = cs.sweep.knee
-        typer.echo(f"[{cs.condition}] seed={cs.seed} coarse order: {cs.sweep.coarse_order}")
+        typer.echo(
+            f"[{cs.condition} rep {cs.repetition}] seed={cs.seed} "
+            f"coarse order: {cs.sweep.coarse_order}"
+        )
         typer.echo(f"  bisect rates: {cs.sweep.bisect_rates}")
         for s in cs.sweep.steps:
             m = s.measurement
@@ -107,7 +115,10 @@ def sweep(
 ) -> None:
     """Coarse log-spaced sweep, then bracketed search for the knee, per condition."""
     try:
-        outcome = run_sweeps(load_experiment(spec), results, base_dir=spec.resolve().parent.parent)
+        outcome = run_sweeps(
+            load_experiment(spec), results, base_dir=spec.resolve().parent.parent,
+            collectors_factory=default_collectors,
+        )
     except (RunnerError, ValueError, KeyError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(EXIT_ERROR) from exc
@@ -128,7 +139,10 @@ def validate(
     if not offline:
         try:
             experiment = load_experiment(spec)
-            outcome = run_sweeps(experiment, results, base_dir=spec.resolve().parent.parent)
+            outcome = run_sweeps(
+                experiment, results, base_dir=spec.resolve().parent.parent,
+                collectors_factory=default_collectors,
+            )
         except (RunnerError, ValueError, KeyError) as exc:
             typer.echo(f"error: {exc}", err=True)
             raise typer.Exit(EXIT_ERROR) from exc

@@ -16,10 +16,12 @@ from serverlab.analysis.knee import StepMeasurement
 from serverlab.analysis.sweep import SweepResult, run_sweep
 from serverlab.experiment.runner import (
     Cmd,
+    CollectorsFactory,
     HdrBuilder,
     RunnerError,
     RunRecord,
     build_hdr_file,
+    plan_schedule,
     prepare_experiment,
     run_one,
     shell,
@@ -31,6 +33,8 @@ from serverlab.load.k6 import ContainerExec
 
 class ConditionSweep(BaseModel):
     condition: str
+    repetition: int
+    index: int  # position in the interleaved sweep order
     seed: int
     sweep: SweepResult
     records: list[RunRecord]
@@ -68,6 +72,7 @@ def run_sweeps(
     base_dir: Path | None = None,
     cmd: Cmd = shell,
     hdr_builder: HdrBuilder | None = build_hdr_file,
+    collectors_factory: CollectorsFactory | None = None,
     sleep: Callable[[float], None] = time.sleep,
     adapter_factory: Callable[[ContainerExec], Any] | None = None,
     on_step: Callable[[str, StepMeasurement], None] | None = None,
@@ -79,15 +84,22 @@ def run_sweeps(
     prep = prepare_experiment(spec, results_root, None, base=base, cmd=cmd)
     load_cpus = len(spec.cpus.load)
     out: list[ConditionSweep] = []
+    # Sweeps are interleaved across conditions in a seeded randomized-block order, exactly like
+    # ordinary runs (plan.md s3.5), and the order is stored before anything runs.
+    schedule = plan_schedule(spec)
+    (prep.result_dir / "schedule.json").write_text(schedule.model_dump_json(indent=2))
+    step_counter: dict[str, int] = {}  # per condition, across repetitions: run ids stay unique
 
-    for cond_idx, cond in enumerate(spec.conditions):
-        seed = spec.seed + cond_idx
+    for sched in schedule.runs:
+        name = sched.condition
+        seed = spec.seed + sched.index
         records: list[RunRecord] = []
 
         def measure(
-            rate: int, name: str = cond.name, records: list[RunRecord] = records
+            rate: int, name: str = name, records: list[RunRecord] = records
         ) -> StepMeasurement:
-            step_no = len(records) + 1
+            step_no = step_counter.get(name, 0) + 1
+            step_counter[name] = step_no
             step_load = spec.load.model_copy(
                 update={"rate": rate, "duration_s": cfg.step_duration_s}
             )
@@ -99,8 +111,9 @@ def run_sweeps(
             try:
                 rec = run_one(
                     step_spec, run, prep.sut_image, prep.assignment, prep.comparability,
-                    prep.result_dir, cmd=cmd, hdr_builder=hdr_builder, collector_factory=None,
-                    sleep=sleep, adapter_factory=adapter_factory,
+                    prep.result_dir, cmd=cmd, hdr_builder=hdr_builder,
+                    collectors_factory=collectors_factory, sleep=sleep,
+                    adapter_factory=adapter_factory,
                 )
             except (RunnerError, OSError, ValueError) as exc:
                 m = StepMeasurement(
@@ -118,8 +131,13 @@ def run_sweeps(
             measure, cfg.rate_lo, cfg.rate_hi, seed, cfg.coarse_points, cfg.max_bisect,
             cfg.width_target_pct,
         )
-        out.append(ConditionSweep(condition=cond.name, seed=seed, sweep=sweep, records=records))
-        (prep.result_dir / f"sweep_{cond.name}.json").write_text(out[-1].model_dump_json(indent=2))
+        out.append(ConditionSweep(
+            condition=name, repetition=sched.repetition, index=sched.index, seed=seed,
+            sweep=sweep, records=records,
+        ))
+        (prep.result_dir / f"sweep_{name}_{sched.repetition}.json").write_text(
+            out[-1].model_dump_json(indent=2)
+        )
 
     return SweepOutcome(
         result_dir=prep.result_dir, comparability=prep.comparability, conditions=out

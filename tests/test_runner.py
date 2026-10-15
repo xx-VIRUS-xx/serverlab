@@ -13,7 +13,12 @@ from typer.testing import CliRunner
 
 import serverlab.experiment.runner as runner
 from serverlab.cli import app
-from serverlab.experiment.runner import ExperimentOutcome, run_experiment
+from serverlab.experiment.runner import (
+    CollectorContext,
+    ExperimentOutcome,
+    NamedCollector,
+    run_experiment,
+)
 from serverlab.experiment.spec import ExperimentSpec
 from serverlab.load.base import LatencyMs, LoadSpec, RunResult
 
@@ -81,10 +86,7 @@ class Stats(BaseModel):
 
 class FakeCollector:
     started: list[str] = []
-    containers: list[list[str]] = []
-
-    def __init__(self, containers: list[str]) -> None:
-        FakeCollector.containers.append(containers)
+    contexts: list[CollectorContext] = []
 
     def start(self, run_id: str, out_path: Path) -> None:
         out_path.write_text('{"cpu_percent": 1.0}\n')
@@ -94,19 +96,26 @@ class FakeCollector:
         return Stats()
 
 
+def fake_factory(ctx: CollectorContext) -> list[NamedCollector]:
+    FakeCollector.contexts.append(ctx)
+    return [("docker", FakeCollector())]
+
+
 def _run(tmp_path: Path, spec: ExperimentSpec, docker: FakeDocker | None = None,
          adapter: FakeAdapter | None = None, **kw: Any) -> ExperimentOutcome:
     adapter = adapter or FakeAdapter()
     return run_experiment(spec, tmp_path, base_dir=tmp_path, cmd=docker or FakeDocker(),
                           adapter_factory=lambda _c: adapter, sleep=lambda _s: None,
-                          **{"collector_factory": None, **kw})
+                          **{"collectors_factory": None, **kw})
 
 
 def test_full_layout_and_fresh_state_per_run(tmp_path: Path) -> None:
     docker, adapter = FakeDocker(), FakeAdapter()
-    FakeCollector.started, FakeCollector.containers = [], []
-    out = _run(tmp_path, _spec(2), docker, adapter, collector_factory=FakeCollector)
-    assert all(len(c) == 1 and c[0].endswith("-sut-1") for c in FakeCollector.containers)
+    FakeCollector.started, FakeCollector.contexts = [], []
+    out = _run(tmp_path, _spec(2), docker, adapter, collectors_factory=fake_factory)
+    assert len(FakeCollector.contexts) == 4 and all(
+        c.project.endswith(c.run_id.lower().replace("_", "-")) for c in FakeCollector.contexts
+    )
     d = out.result_dir
     for name in ("environment.json", "spec.yaml", "schedule.json"):
         assert (d / name).is_file()
@@ -194,6 +203,6 @@ def test_sut_cpu_usec_recorded_from_cgroup_delta(tmp_path: Path) -> None:
 
 def test_per_condition_metrics_override(tmp_path: Path) -> None:
     spec = _spec(1, conditions=[{"name": "off", "metrics_enabled": False}, {"name": "on"}])
-    FakeCollector.started, FakeCollector.containers = [], []
-    _run(tmp_path, spec, collector_factory=FakeCollector)
+    FakeCollector.started, FakeCollector.contexts = [], []
+    _run(tmp_path, spec, collectors_factory=fake_factory)
     assert FakeCollector.started == ["run_on_1"]

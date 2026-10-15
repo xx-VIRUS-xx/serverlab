@@ -38,8 +38,25 @@ class Collector(Protocol):
     def stop(self) -> Any: ...
 
 
-def default_collector_factory(containers: list[str]) -> Collector:
-    return DockerStatsCollector(interval_s=1.0, containers=containers)
+@dataclass(frozen=True)
+class CollectorContext:
+    spec: ExperimentSpec
+    project: str
+    run_id: str
+    condition: str
+
+
+# (name, collector): `name` is the key in RunRecord.metrics_stats and the file suffix.
+NamedCollector = tuple[str, Collector]
+CollectorsFactory = Callable[[CollectorContext], list[NamedCollector]]
+
+
+def default_collectors(ctx: CollectorContext) -> list[NamedCollector]:
+    """Container stats for the SUT and every extra service. Always out-of-band, host side."""
+    names = ["sut", *(s.name for s in ctx.spec.target.services)]
+    containers = [f"{ctx.project}-{n}-1" for n in names]
+    return [("docker", DockerStatsCollector(interval_s=ctx.spec.metrics.interval_s,
+                                            containers=containers))]
 
 
 def build_hdr_file(ndjson: Path, out: Path) -> dict[str, int]:
@@ -75,7 +92,7 @@ class RunRecord(BaseModel):
     k6_image: str
     cpus: dict[str, list[int]]
     hdr_stats: dict[str, int] | None = None
-    metrics_stats: dict[str, Any] | None = None
+    metrics_stats: dict[str, Any] | None = None  # collector name -> its stats
     sut_cpu_usec: int | None = None
     sut_cpu_note: str | None = None
     comparability: str
@@ -201,7 +218,7 @@ def run_experiment(
     base_dir: Path | None = None,
     cmd: Cmd = shell,
     hdr_builder: HdrBuilder | None = build_hdr_file,
-    collector_factory: Callable[[list[str]], Collector] | None = default_collector_factory,
+    collectors_factory: CollectorsFactory | None = default_collectors,
     sleep: Callable[[float], None] = time.sleep,
     adapter_factory: Callable[[ContainerExec], Any] | None = None,
 ) -> ExperimentOutcome:
@@ -215,7 +232,7 @@ def run_experiment(
         try:
             record = run_one(
                 spec, run, prep.sut_image, prep.assignment, prep.comparability, result_dir,
-                cmd=cmd, hdr_builder=hdr_builder, collector_factory=collector_factory,
+                cmd=cmd, hdr_builder=hdr_builder, collectors_factory=collectors_factory,
                 sleep=sleep, adapter_factory=adapter_factory,
             )
             outcome.records.append(record)
@@ -245,7 +262,7 @@ def run_one(
     *,
     cmd: Cmd,
     hdr_builder: HdrBuilder | None,
-    collector_factory: Callable[[list[str]], Collector] | None,
+    collectors_factory: CollectorsFactory | None,
     sleep: Callable[[float], None],
     adapter_factory: Callable[[ContainerExec], Any] | None,
 ) -> RunRecord:
@@ -266,10 +283,10 @@ def run_one(
     adapter = adapter_factory(container) if adapter_factory else K6Adapter(container=container)
     # Only the SUT container: with no names, `docker stats` would watch the whole host.
     sut_container = f"{project}-sut-1"
-    collector = (
-        collector_factory([sut_container])
-        if collector_factory and spec.collector_enabled(run.condition)
-        else None
+    collectors: list[NamedCollector] = (
+        collectors_factory(CollectorContext(spec, project, run_id, run.condition))
+        if collectors_factory and spec.collector_enabled(run.condition)
+        else []
     )
     cpu_note: str | None = None
     sut_cpu_usec: int | None = None
@@ -286,8 +303,9 @@ def run_one(
             )
             (raw / f"{run_id}.warmup.json").write_text(wr.model_dump_json(indent=2))
         ndjson = raw / f"{run_id}.requests.json"
-        if collector is not None:
-            collector.start(run_id, result_dir / "metrics" / f"{run_id}.jsonl")
+        for cname, collector in collectors:
+            suffix = "" if cname == "docker" else f".{cname}"
+            collector.start(run_id, result_dir / "metrics" / f"{run_id}{suffix}.jsonl")
         cpu_before, cpu_note = read_cpu_usec(cmd, sut_container)
         try:
             result: RunResult = adapter.run(
@@ -300,9 +318,12 @@ def run_one(
             else:
                 cpu_note = cpu_note or after_note
         finally:
-            if collector is not None:
+            for cname, collector in collectors:
                 stats = collector.stop()
-                metrics_stats = stats.model_dump() if hasattr(stats, "model_dump") else dict(stats)
+                metrics_stats = metrics_stats or {}
+                metrics_stats[cname] = (
+                    stats.model_dump() if hasattr(stats, "model_dump") else dict(stats)
+                )
         if hdr_builder is not None and ndjson.exists():
             hdr = raw / f"{run_id}.hdr"
             hdr_stats = hdr_builder(ndjson, hdr)

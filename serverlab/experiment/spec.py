@@ -80,6 +80,12 @@ class RunSpec(BaseModel):
 class MetricsSpec(BaseModel):
     enabled: bool = True
     interval_s: float = Field(default=1.0, ge=1.0, description="sampling interval, >= 1 s")
+    app_metrics_path: str | None = Field(
+        default=None, description="GET path on the published API port returning pool/app counters"
+    )
+    pg_service: str | None = Field(
+        default=None, description="name of a target.services entry to sample pg_stat_activity from"
+    )
 
 
 class SweepConfig(BaseModel):
