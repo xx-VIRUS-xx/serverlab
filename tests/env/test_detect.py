@@ -253,7 +253,10 @@ def test_mac_low_power_battery_and_speed_limit_parsed() -> None:
 def test_linux_has_null_mac_probes_with_reasons_and_failed_docker_is_null() -> None:
     env = capture_environment(
         host_system="Linux", experiment_dir=Path("/exp"),
-        runner=make_runner(LINUX_ANSWERS), read_text=make_reader(LINUX_FILES),
+        runner=make_runner(
+            {k: v for k, v in LINUX_ANSWERS.items() if k[:2] != ("docker", "ps")}
+        ),
+        read_text=make_reader(LINUX_FILES),
     )
     for name in ("power_source", "low_power_mode", "thermal_cpu_speed_limit_pct"):
         assert getattr(env, name) is None and "macOS only" in env.reasons[name]
