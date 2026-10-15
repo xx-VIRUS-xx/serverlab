@@ -1,6 +1,6 @@
 # Week 4 phase plan: Experiment 1, DB connection pool
 
-Status: **Approved 2026-10-15 with the defaults in section 9; other Docker containers stopped by the owner's instruction. In progress.**
+Status: **Approved 2026-10-15 with the defaults in section 9; other Docker containers stopped by the owner's instruction. Implemented, run and written up; results in section 11.**
 Source: `plan.md` s6 Week 4. Locked decisions s3.1-3.12 apply. The thesis this experiment tests: *with a fixed API, the knee of a DB-bound endpoint is set by pool_size / DB service time (Little's law), until another resource saturates first.*
 
 ## 1. Scope
@@ -92,4 +92,28 @@ Primary estimators changed from the p99-onset knee to (1) the utilization-law AP
 - One plumbing sweep (`experiments/week4_smoke.yaml`, pool 10, 4 coarse steps) was run to verify collectors and topology before the calibration. It is not part of the evidence.
 
 ## 11. Evidence
-(filled after implementation)
+Run: `serverlab sweep experiments/week4_pool.yaml` -> `results/week4_pool/20261015T190907Z` (summaries committed in `docs/results/week4_pool/`), 15 sweeps (5 pool sizes x 3, interleaved in the stored seeded order), about 2 h. Graded with `serverlab analyze-pool` against the predictions committed beforehand (`docs/predictions.md`, Week 4 amendments 1-3; outcome table appended there). Dev Mac, `not-cross-machine-comparable`, **environment warning: host swap 13 002 MiB in use**. No step was classified `invalid-other`.
+
+| Pool n | Predicted `n/0.050` (req/s) | Measured plateau (median of 3 sweeps) | Error | Per-interval plateau, IQR (req/s) | Hold time `n / plateau` (ms) | Backends in `PgSleep` while saturated | Grade |
+|---|---|---|---|---|---|---|---|
+| 5  | 100  | 95   | -5.4%  | 94-96     | 52.8 | 87% of samples at >= 90% of the pool | **PASS** |
+| 10 | 200  | 189  | -5.5%  | 182-191   | 52.9 | 90% | **PASS** |
+| 20 | 400  | 378  | -5.5%  | 357-384   | 52.9 | 87% | **PASS** |
+| 40 | 800  | 718  | -10.2% | 647-742   | 56.5 | 61% (median 37 of 40) | **PASS** (within 15%) |
+| 80 | 1600 | 1121 | -30.0% | 461-1237  | 69.7 | 43% (median 65 of 80) | not graded (ambiguous by construction) |
+
+Secondary, ungraded p99 knees (3 sweeps each): pool 5: 97, 97, 97; pool 10: 193, 193, 193; pool 20: 387, 387, 387 (-3% vs prediction); pool 40: 648, 567, 740; pool 80: 712, 738, 738.
+
+**What the data support**
+1. **Little's law holds for pools 5-20.** Capacity doubles when the pool doubles (95 -> 189 -> 378) and the implied hold time is a constant 52.8-52.9 ms. The prediction used the 50 ms `pg_sleep`; the consistent -5.5% is a fixed ~2.9 ms per-request overhead (acquire, round trip, release on this stack). That explanation is read off the data after the fact, consistent across three sizes; it was not a prediction.
+2. **The bottleneck moves between pool 20 and pool 80.** Pool 40 gives 1.9x of pool 20 for 2x the connections (718 vs 378) and the hold time starts to rise (56.5 ms); pool 80 gives 1.56x of pool 40 and the hold time reaches 69.7 ms. From the database side, the share of saturated samples with the whole pool inside `pg_sleep` falls from ~90% (pools 5-20) to 61% (pool 40) and 43% (pool 80): connections are checked out but not in the database, i.e. the API's event loop is the limiter. Postgres container CPU stayed at 3-5% of a CPU throughout.
+3. The p99-based knee, which was unusable during calibration, agrees with the plateau for pools 5-20 in this run.
+
+**What they do not show / honest limits**
+- One host (an 8 GiB Mac under swap pressure), 3 sweeps per size. The per-sweep medians are nearly identical (e.g. 95/95/95), so a bootstrap CI over them would be degenerate and is not reported; the per-interval IQR is the honest spread. Run-to-run variation on a quieter or different host is unknown.
+- `pg_sleep` isolates the pool but is not a realistic query. The ~2.9 ms overhead and the API limit near 1100 req/s are properties of this stack on this machine, not general numbers.
+- Pool 80 is **not** a confirmed result: it was ungraded by the committed rules because its predicted capacity lies inside the (wide) API-ceiling interval. The measured 1121 req/s and the hold-time evidence point to the API, but the API ceiling `A` itself was never pinned down: calibration run 1's utilization-law estimate, 1577 req/s [1413, 1741], did **not** contain the observed API-limited plateau (about 1120-1190), because it extrapolated a linear CPU cost beyond the 975 req/s of data it was fit on; run 2's interval [896, 3510] contains it but is uninformative. Utilization-law extrapolation beyond the measured range is not trustworthy here.
+- Pool 40's pass is within tolerance but its hold time is already inflated, so "pool-limited" is the label by the committed rule, not a clean diagnosis (limiting resource is shared).
+- The p99 knee was unreliable in the calibration runs on this host; that it behaved in the main run does not make it reliable in general.
+
+**Checks:** `serverlab validate --offline`, ruff, mypy, pytest: see section 11a.

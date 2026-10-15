@@ -14,7 +14,7 @@ It does not claim absolute capacity ("this machine does N req/s"). It makes **re
 | Environment capture (host, Docker VM, memory/swap, power, other containers) with warnings | built, tested |
 | Seeded, randomized-block experiment schedule; clean stack per run; collectors (container stats, app pool metrics, `pg_stat_activity`) | built, tested |
 | Statistics (HDR merge, seeded bootstrap CIs, effect size), knee finder, coarse-then-bracket sweep, `serverlab validate` | built, validated on a synthetic target of known capacity |
-| Experiment 1: DB connection pool (FastAPI + Postgres) | built; see *Results* |
+| Experiment 1: DB connection pool (FastAPI + Postgres) | built and run once on one host; see *Results* |
 | Local web UI and Python SDK | built |
 | Experiment 2 (sync/async/multi-process workers), Experiment 3 (Redis hit ratio), bottleneck rule engine + HTML report, LLM-serving experiment | **not built** (roadmap in `plan.md`, weeks 5-8) |
 
@@ -69,7 +69,17 @@ Tool validation (synthetic target with known capacity, thresholds committed firs
 
 Collector overhead (dev host): -0.11 percentage points of SUT CPU, indistinguishable from run-to-run noise. Details: `docs/phases/week2.md`.
 
-Experiment 1 (connection pool): see `docs/phases/week4.md` and `docs/predictions.md` for the predictions, the amendments and the measured outcome, including what could not be resolved on this host.
+Experiment 1, DB connection pool (FastAPI + async pool + Postgres, 50 ms `pg_sleep`; predictions committed before the runs, 3 interleaved sweeps per pool size, one Mac under memory pressure):
+
+| Pool size | Predicted capacity `n / 0.05 s` | Measured plateau | Error | Hold time `n / plateau` |
+|---|---|---|---|---|
+| 5  | 100 req/s  | 95   | -5.4%  | 52.8 ms |
+| 10 | 200 req/s  | 189  | -5.5%  | 52.9 ms |
+| 20 | 400 req/s  | 378  | -5.5%  | 52.9 ms |
+| 40 | 800 req/s  | 718  | -10.2% | 56.5 ms |
+| 80 | 1600 req/s | 1121 | -30.0% (not graded) | 69.7 ms |
+
+Capacity scales linearly with the pool up to about 20 connections, with a constant ~52.9 ms hold time (50 ms service plus ~2.9 ms overhead on this stack). Beyond that the API's own event loop becomes the limiter: the hold time rises, and the share of checked-out connections actually inside the database drops from ~90% to 43%. The four graded sizes passed the pre-committed 15% rule; pool 80 was ungraded by those rules and is not a confirmed result. Read the caveats (one host, n=3, the unreliable calibration of the API ceiling, `pg_sleep` is not a real query) in [`docs/phases/week4.md`](docs/phases/week4.md) before quoting any of this. The raw evidence summaries are in [`docs/results/`](docs/results/).
 
 ## Repository layout
 
