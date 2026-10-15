@@ -126,6 +126,7 @@ class RunError:
 class ExperimentOutcome:
     result_dir: Path
     schedule: Schedule
+    warnings: list[str] = field(default_factory=list)
     records: list[RunRecord] = field(default_factory=list)
     errors: list[RunError] = field(default_factory=list)
 
@@ -191,6 +192,7 @@ class Prepared:
     sut_image: str
     assignment: CpuAssignment
     comparability: str
+    warnings: list[str] = field(default_factory=list)
 
 
 def prepare_experiment(
@@ -225,7 +227,7 @@ def prepare_experiment(
         experiment_dir=base,
     )
     (result_dir / "environment.json").write_text(env.model_dump_json(indent=2))
-    return Prepared(result_dir, sut_image, assignment, env.comparability)
+    return Prepared(result_dir, sut_image, assignment, env.comparability, list(env.warnings))
 
 
 def run_experiment(
@@ -243,7 +245,7 @@ def run_experiment(
     schedule = plan_schedule(spec)
     prep = prepare_experiment(spec, results_root, schedule, base=base, cmd=cmd)
     result_dir = prep.result_dir
-    outcome = ExperimentOutcome(result_dir=result_dir, schedule=schedule)
+    outcome = ExperimentOutcome(result_dir=result_dir, schedule=schedule, warnings=prep.warnings)
     for run in schedule.runs:
         run_id = run_id_for(run)
         try:

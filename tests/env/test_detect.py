@@ -54,6 +54,10 @@ LINUX_ANSWERS: dict[tuple[str, ...], CommandResult] = {
 
 LINUX_FILES: dict[str, str] = {
     "/etc/os-release": 'NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 22.04.4 LTS"\n',
+    "/proc/meminfo": (
+        "MemTotal:       16777216 kB\nMemAvailable:    8388608 kB\n"
+        "SwapTotal:       2097152 kB\nSwapFree:        2097152 kB\n"
+    ),
     "/proc/cpuinfo": "processor\t: 0\nmodel name\t: Test CPU 9000\n",
     GOVERNOR_PATH: "performance\n",
 }
@@ -100,6 +104,7 @@ def test_linux_native_docker_is_canonical() -> None:
     assert info.comparability == "canonical"
     # only the macOS-only probes are null on a canonical Linux host, each with its reason
     assert set(info.reasons) == {"power_source", "low_power_mode", "thermal_cpu_speed_limit_pct"}
+    assert (info.host_memory_gib, info.memory_free_pct, info.swap_used_mib) == (16.0, 50, 0.0)
     assert info.other_running_containers == []
 
 
@@ -261,3 +266,47 @@ def test_linux_has_null_mac_probes_with_reasons_and_failed_docker_is_null() -> N
     for name in ("power_source", "low_power_mode", "thermal_cpu_speed_limit_pct"):
         assert getattr(env, name) is None and "macOS only" in env.reasons[name]
     assert env.other_running_containers is None and env.reasons["other_running_containers"]
+
+
+def test_mac_memory_pressure_and_swap_captured() -> None:
+    env = _mac_env({
+        ("sysctl", "-n", "hw.memsize"): ok("8589934592"),
+        ("memory_pressure",): ok(
+            "The system has 8589934592 bytes\nSystem-wide memory free percentage: 32%"
+        ),
+        ("sysctl", "-n", "vm.swapusage"): ok(
+            "total = 17408.00M  used = 16613.81M  free = 794.19M  (encrypted)"
+        ),
+    })
+    assert (env.host_memory_gib, env.memory_free_pct, env.swap_used_mib) == (8.0, 32, 16613.81)
+
+
+def test_unparseable_memory_probes_are_null_with_reasons() -> None:
+    env = _mac_env({("sysctl", "-n", "hw.memsize"): ok("lots"), ("memory_pressure",): ok("n/a")})
+    assert env.host_memory_gib is None and "hw.memsize" in env.reasons["host_memory_gib"]
+    assert env.memory_free_pct is None and env.reasons["memory_free_pct"]
+
+
+def test_environment_warnings_flag_a_thrashing_battery_host() -> None:
+    env = _mac_env({
+        ("sysctl", "-n", "hw.memsize"): ok("8589934592"),
+        ("memory_pressure",): ok("System-wide memory free percentage: 5%"),
+        ("sysctl", "-n", "vm.swapusage"): ok("total = 17408.00M  used = 16613.81M  free = 1M"),
+        ("pmset", "-g", "batt"): ok("Now drawing from 'Battery Power'"),
+        ("pmset", "-g"): ok(" lowpowermode         1"),
+        ("docker", "ps", "--format", "{{.Names}}"): ok("phielia-pg"),
+    })
+    text = " | ".join(env.warnings)
+    for needle in ("swap", "free memory", "battery", "Low Power", "phielia-pg"):
+        assert needle.lower() in text.lower(), needle
+
+
+def test_clean_environment_has_no_warnings() -> None:
+    env = _mac_env({
+        ("memory_pressure",): ok("System-wide memory free percentage: 60%"),
+        ("sysctl", "-n", "vm.swapusage"): ok("total = 1024.00M  used = 0.00M  free = 1024.00M"),
+        ("pmset", "-g", "batt"): ok("Now drawing from 'AC Power'"),
+        ("pmset", "-g"): ok(" lowpowermode         0"),
+        ("docker", "ps", "--format", "{{.Names}}"): ok(""),
+    })
+    assert env.warnings == []

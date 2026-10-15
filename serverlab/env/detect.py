@@ -79,6 +79,9 @@ NULLABLE_FIELDS: tuple[str, ...] = (
     "low_power_mode",
     "thermal_cpu_speed_limit_pct",
     "other_running_containers",
+    "host_memory_gib",
+    "memory_free_pct",
+    "swap_used_mib",
 )
 
 
@@ -109,8 +112,20 @@ class EnvironmentInfo(BaseModel):
         default=None,
         description="containers running at capture time that are not part of this experiment",
     )
+    host_memory_gib: float | None = Field(default=None, description="physical RAM of the host")
+    memory_free_pct: int | None = Field(
+        default=None, description="host free memory % at capture (macOS memory_pressure; "
+        "Linux MemAvailable/MemTotal)"
+    )
+    swap_used_mib: float | None = Field(
+        default=None, description="swap in use at capture; large values mean the host is thrashing"
+    )
     cpu_pinning_reliable: bool
     comparability: Literal["canonical", "not-cross-machine-comparable"]
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="conditions that make measurements on this host less trustworthy",
+    )
     reasons: dict[str, str] = Field(
         default_factory=dict,
         description="field name -> why the value is null (or why it is not canonical)",
@@ -272,6 +287,78 @@ def _other_containers(runner: CommandRunner) -> tuple[list[str] | None, str | No
     return [n for n in names if not n.startswith("serverlab-")], None
 
 
+def _memory(
+    system: str, runner: CommandRunner, read_text: ReadText
+) -> tuple[float | None, int | None, float | None, dict[str, str]]:
+    """(total GiB, free %, swap used MiB, reasons). Nothing is guessed."""
+    why: dict[str, str] = {}
+    total: float | None = None
+    free: int | None = None
+    swap: float | None = None
+    if system == "Darwin":
+        t_txt, t_reason = _run_probe(runner, ["sysctl", "-n", "hw.memsize"])
+        if t_txt and t_txt.strip().isdigit():
+            total = round(int(t_txt) / 1024**3, 2)
+        else:
+            why["host_memory_gib"] = t_reason or f"unparseable hw.memsize: {t_txt!r}"
+        f_txt, f_reason = _run_probe(runner, ["memory_pressure"])
+        m = re.search(r"free percentage:\s*(\d+)%", f_txt or "")
+        if m:
+            free = int(m.group(1))
+        else:
+            why["memory_free_pct"] = f_reason or "no 'free percentage' line in memory_pressure"
+        s_txt, s_reason = _run_probe(runner, ["sysctl", "-n", "vm.swapusage"])
+        m2 = re.search(r"used = ([0-9.]+)M", s_txt or "")
+        if m2:
+            swap = float(m2.group(1))
+        else:
+            why["swap_used_mib"] = s_reason or "no 'used' value in vm.swapusage"
+    elif system == "Linux":
+        text = read_text("/proc/meminfo")
+        if text is None:
+            for k in ("host_memory_gib", "memory_free_pct", "swap_used_mib"):
+                why[k] = "/proc/meminfo not readable"
+        else:
+            vals = {k: int(v) for k, v in re.findall(r"^(\w+):\s+(\d+) kB", text, re.MULTILINE)}
+            if "MemTotal" in vals:
+                total = round(vals["MemTotal"] / 1024**2, 2)
+                if "MemAvailable" in vals:
+                    free = round(100 * vals["MemAvailable"] / vals["MemTotal"])
+            if "SwapTotal" in vals and "SwapFree" in vals:
+                swap = round((vals["SwapTotal"] - vals["SwapFree"]) / 1024, 1)
+            for k, v in (("host_memory_gib", total), ("memory_free_pct", free),
+                         ("swap_used_mib", swap)):
+                if v is None:
+                    why[k] = "field missing from /proc/meminfo"
+    else:
+        for k in ("host_memory_gib", "memory_free_pct", "swap_used_mib"):
+            why[k] = f"memory probes not implemented for {system!r}"
+    return total, free, swap, why
+
+
+SWAP_WARN_MIB = 1024.0
+FREE_MEM_WARN_PCT = 15
+
+
+def _warnings(
+    swap_used: float | None, mem_free: int | None, power: str | None,
+    low_power: bool | None, others: list[str] | None,
+) -> list[str]:
+    out: list[str] = []
+    if swap_used is not None and swap_used > SWAP_WARN_MIB:
+        out.append(f"host swap in use: {swap_used:.0f} MiB (> {SWAP_WARN_MIB:.0f}): "
+                   "stalls from swapping will add latency noise")
+    if mem_free is not None and mem_free < FREE_MEM_WARN_PCT:
+        out.append(f"free memory {mem_free}% (< {FREE_MEM_WARN_PCT}%)")
+    if power is not None and "AC" not in power:
+        out.append(f"host is on {power}, not AC power")
+    if low_power:
+        out.append("Low Power Mode is on")
+    if others:
+        out.append(f"other containers running: {', '.join(others)}")
+    return out
+
+
 def _pinning(
     host_system: str, docker_os: str | None, docker_os_reason: str | None
 ) -> tuple[bool, str | None]:
@@ -347,6 +434,11 @@ def capture_environment(
     thermal_limit = _take(reasons, "thermal_cpu_speed_limit_pct", _thermal_limit(system, runner))
     other_containers = _take(reasons, "other_running_containers", _other_containers(runner))
 
+    mem_total, mem_free, swap_used, mem_why = _memory(system, runner, read_text)
+    reasons.update(mem_why)
+
+    warnings = _warnings(swap_used, mem_free, power_source, low_power_mode, other_containers)
+
     reliable, pinning_reason = _pinning(system, docker_os, docker_os_pair[1])
     if pinning_reason is not None:
         reasons["cpu_pinning_reliable"] = pinning_reason
@@ -376,7 +468,11 @@ def capture_environment(
         low_power_mode=low_power_mode,
         thermal_cpu_speed_limit_pct=thermal_limit,
         other_running_containers=other_containers,
+        host_memory_gib=mem_total,
+        memory_free_pct=mem_free,
+        swap_used_mib=swap_used,
         cpu_pinning_reliable=reliable,
         comparability=comparability,
+        warnings=warnings,
         reasons=reasons,
     )

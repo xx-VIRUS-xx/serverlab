@@ -1,11 +1,11 @@
-# Calibration: API ceiling A on this host. Pool 400 is never the limiter (C_pool = 8000 req/s),
+# Calibration: API ceiling A on this host. Pool 160 is never the limiter (C_pool = 3200 req/s, above the top of the sweep range),
 # so the knee found here is the API's own ceiling. Same stack, topology and controls as the main run.
 name: week4_calibration
 seed: 20261015
 repetitions: 3
 conditions:
-  - name: pool-400
-    target_env: {POOL_SIZE: "400"}
+  - name: pool-160
+    target_env: {POOL_SIZE: "160"}
 target:
   image: serverlab-api
   build_context: .

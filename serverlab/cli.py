@@ -46,6 +46,8 @@ def run(
     except (RunnerError, ValueError, KeyError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(EXIT_ERROR) from exc
+    for w in outcome.warnings:
+        typer.echo(f"WARNING (environment): {w}", err=True)
     typer.echo(f"results: {outcome.result_dir}")
     typer.echo(f"order: {outcome.schedule.order()}")
     for rec in sorted(outcome.records, key=lambda r: r.index):
@@ -88,6 +90,8 @@ def overhead(
 
 
 def _print_sweep(outcome: SweepOutcome) -> None:
+    for w in outcome.warnings:
+        typer.echo(f"WARNING (environment): {w}", err=True)
     for cs in outcome.conditions:
         k = cs.sweep.knee
         typer.echo(

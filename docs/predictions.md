@@ -36,3 +36,16 @@ Predicted knee = `min(C_pool(n), A)` where `A` is the API's own ceiling on this 
 Pass rule (not retuned after seeing data): for each pool size the measured knee estimate is within 15% of the predicted knee. For each size the report states whether the pool or the API limited it, using the app pool metrics (`pool_available == 0`, `requests_waiting > 0`) and `pg_stat_activity` (backends in `PgSleep` equal to the pool size) at the knee.
 
 Known expectation stated in advance, from Week 3: the knee estimate sits ~1-2% below the true capacity because the step at an offered rate equal to capacity already queues.
+
+### Week 4 addendum: calibration run 1 was inconclusive (committed before any pool-size sweep)
+
+Calibration run 1 (`results/week4_calibration/20261015T020420Z`, pool 400, 3 interleaved sweeps) gave knee estimates 737, 281 and 473 req/s (median 473, spread 2.6x). It is reported in full and is **not** used as `A`. Why it is inconclusive:
+- Latency onset moved between sweeps while the API was not saturated: at 975 req/s the API container used about 45-60% of its CPU with no requests waiting for the pool, and the same offered rate was `ok` in one sweep and `saturated` in another. The API's real CPU ceiling only appears at 1700+ req/s (container CPU about 100%).
+- Host evidence at that time: 8 GiB physical RAM, Docker VM allocated 7.7 GiB, swap 16.6 GB used of 17.4 GB, 92 MB unused, `kernel_task` at 47% CPU (`top`, `memory_pressure`, `vm.swapusage`). A host that is swapping adds random stalls, which the p99-based knee criterion reads as the knee.
+- Pool 400 also made Postgres use 709 MiB (vs 92 MiB at pool 10).
+
+Procedure change, declared now and before any pool-size data exists:
+1. The owner reduces memory pressure (quits heavy applications, lowers Docker Desktop memory to about 3 GiB). Environment capture now records host RAM, free memory %, swap in use and emits warnings; any run with warnings is labelled in its output.
+2. The calibration pool is 160 instead of 400 (`C_pool` = 3200 req/s, still above the top of the sweep range), to cut Postgres memory.
+3. The calibration is repeated exactly once, same procedure (3 sweeps, `A` = median estimate). No further calibration reruns to improve `A`.
+4. If the three estimates of the repeat differ by more than 1.5x (max/min), `A` is reported as the interval [min, max], and for pool sizes where `C_pool` exceeds `A_lo` the prediction becomes the interval [min(C_pool, A_lo), min(C_pool, A_hi)]; the pass rule is then "measured knee within 15% of any value in that interval". Predictions for pool sizes whose `C_pool` is below `A_lo` are unchanged.

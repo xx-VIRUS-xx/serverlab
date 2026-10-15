@@ -43,6 +43,7 @@ class ConditionSweep(BaseModel):
 class SweepOutcome(BaseModel):
     result_dir: Path
     comparability: str
+    warnings: list[str] = []
     conditions: list[ConditionSweep]
 
 
@@ -140,5 +141,6 @@ def run_sweeps(
         )
 
     return SweepOutcome(
-        result_dir=prep.result_dir, comparability=prep.comparability, conditions=out
+        result_dir=prep.result_dir, comparability=prep.comparability,
+        warnings=prep.warnings, conditions=out,
     )
