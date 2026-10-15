@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from serverlab.analysis.pool_report import grade_size, sweep_capacities, utilization_fit_for
 from serverlab.analysis.validate import (
     coverage_checks,
     grade_knee,
@@ -172,6 +173,48 @@ def validate(
         typer.echo(f"VALIDATION FAILED: {len(failed)} check(s)", err=True)
         raise typer.Exit(EXIT_INVALID_RUN)
     typer.echo("offline validation passed" if offline else "validation passed")
+
+
+@app.command("analyze-pool")
+def analyze_pool(
+    results_dir: Annotated[Path, typer.Argument(exists=True, file_okay=False)],
+    calibration: Annotated[
+        Path, typer.Option(exists=True, file_okay=False, help="calibration sweep results dir")
+    ],
+    max_rate: Annotated[int, typer.Option(help="highest offered rate used for the fit")] = 975,
+) -> None:
+    """Grade a pool sweep against the committed predictions (docs/predictions.md)."""
+    fit = utilization_fit_for(calibration, max_rate=max_rate)
+    typer.echo(
+        f"API ceiling A (utilization law, {fit.n} steps, R^2 {fit.r_squared:.3f}): "
+        f"{fit.ceiling:.0f} req/s, 95% interval [{fit.lo:.0f}, {fit.hi:.0f}]; "
+        f"fixed {fit.fixed_us_per_s / 1e4:.1f}% CPU, marginal {fit.marginal_us_per_req:.0f} us/req"
+    )
+    verdicts = [
+        grade_size(size, sweeps, fit.lo, fit.hi)
+        for size, sweeps in sorted(sweep_capacities(results_dir).items())
+    ]
+    for v in verdicts:
+        label = {True: "PASS", False: "FAIL", None: "not graded"}[v.passed]
+        err = "n/a" if v.error_pct is None else f"{v.error_pct:+.1f}%"
+        med = "n/a" if v.c_meas_median is None else f"{v.c_meas_median:.0f}"
+        rng = (
+            "n/a" if v.c_meas_min is None or v.c_meas_max is None
+            else f"{v.c_meas_min:.0f}..{v.c_meas_max:.0f}"
+        )
+        typer.echo(
+            f"[{label}] pool {v.pool_size:<3} C_pool={v.c_pool:<6.0f} regime={v.regime:<12} "
+            f"measured median={med} range={rng} error={err} | {v.note}"
+        )
+        for s in v.sweeps:
+            knee = "n/a" if s.p99_knee_estimate is None else f"{s.p99_knee_estimate:.0f}"
+            typer.echo(
+                f"        rep {s.repetition}: plateau="
+                f"{'n/a' if s.c_meas is None else round(s.c_meas)} "
+                f"({s.saturated_intervals} saturated intervals) p99-knee (secondary)={knee}"
+            )
+    if any(v.passed is False for v in verdicts):
+        raise typer.Exit(EXIT_INVALID_RUN)
 
 
 @app.command()
