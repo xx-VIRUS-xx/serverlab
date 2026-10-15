@@ -85,7 +85,10 @@ def grade_size(
         passed = None
         note = f"C_pool {cp:.0f} lies inside the API ceiling interval [{a_lo:.0f}, {a_hi:.0f}]"
     else:
-        cpu = [s.saturated_steps_sut_cpu_pct for s in sweeps if s.saturated_steps_sut_cpu_pct is not None]
+        cpu = [
+            s.saturated_steps_sut_cpu_pct for s in sweeps
+            if s.saturated_steps_sut_cpu_pct is not None
+        ]
         never = not any(s.pool_ever_saturated for s in sweeps)
         passed = never and bool(cpu) and statistics.median(cpu) >= API_CPU_MIN_PCT
         note = (
