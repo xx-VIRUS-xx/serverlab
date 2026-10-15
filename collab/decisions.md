@@ -7,3 +7,4 @@ Append only. Owner: Claude. Locked design decisions from `plan.md` s3 apply and 
 | D-1 | 2026-10-14 | Agents work on branches; only Claude merges to `main`. | Makes approval a mechanical gate instead of a convention. |
 | D-2 | 2026-10-14 | Task status, board and verdicts are plain markdown files in `collab/`. | All three tools can read/write files; no extra infrastructure. |
 | D-3 | 2026-10-14 | Antigravity and Copilot replaced by Claude Haiku worker sessions spawned by the lead. Task ownership names (ag/cp branches, A-/C- ids) unchanged. | The external tools could not read files outside their workspace, so the shared channel and review files were unreachable. |
+| D-4 | 2026-10-15 | Owner requests a local web UI and a Python SDK, and publishing the project to their git. This overrides the V1 non-goal "no web dashboard" in plan.md s2. Weeks 5-8 of plan.md are not built; the repo's README will say so. | Owner decision. |
