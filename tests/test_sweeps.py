@@ -89,3 +89,29 @@ def test_measurement_uses_wall_time_not_nominal_duration(tmp_path: Path) -> None
     assert m.k6_cpu_pct == 10.0  # 1.0 s CPU over 10.0 s wall on 1 cpu, not over the nominal 5 s
     rec2 = rec.model_copy(update={"result": rec.result.model_copy(update={"k6_wall_s": None})})
     assert measurement_from_record(rec2, 5, 1).k6_cpu_pct is None
+
+
+def test_per_condition_sweep_ranges_are_used_and_validated(tmp_path: Path) -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    raw = _spec().model_dump(mode="json")
+    raw["repetitions"] = 1
+    raw["conditions"] = [
+        {"name": "c1", "sweep_rate_lo": 25, "sweep_rate_hi": 300},
+        {"name": "c2", "sweep_rate_lo": 400, "sweep_rate_hi": 3200},
+    ]
+    spec = ExperimentSpec.model_validate(raw)
+    out = run_sweeps(spec, tmp_path, base_dir=tmp_path, cmd=Docker(), hdr_builder=None,
+                     sleep=lambda _s: None, adapter_factory=lambda _c: Adapter())
+    for cs in out.conditions:
+        lo, hi = (25, 300) if cs.condition == "c1" else (400, 3200)
+        rates = [s.measurement.rate for s in cs.sweep.steps]
+        assert min(rates) == lo and max(rates) == hi
+    raw["conditions"][0]["sweep_rate_hi"] = 10
+    with pytest.raises(ValidationError, match="must exceed"):
+        ExperimentSpec.model_validate(raw)
+    raw["conditions"][0].update(sweep_rate_hi=300)
+    raw["sweep"] = None
+    with pytest.raises(ValidationError, match="no sweep section"):
+        ExperimentSpec.model_validate(raw)

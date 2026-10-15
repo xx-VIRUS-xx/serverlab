@@ -112,6 +112,8 @@ class ConditionSpec(BaseModel):
     name: str = Field(pattern=r"^[A-Za-z0-9-]+$", description="no underscores: used in run ids")
     target_env: dict[str, str] = Field(default_factory=dict)
     load_rate: int | None = Field(default=None, gt=0)
+    sweep_rate_lo: int | None = Field(default=None, ge=1, description="per-condition sweep range")
+    sweep_rate_hi: int | None = Field(default=None, ge=2)
     metrics_enabled: bool | None = Field(
         default=None, description="override metrics.enabled for this condition only"
     )
@@ -131,6 +133,19 @@ class ExperimentSpec(BaseModel):
     metrics: MetricsSpec = Field(default_factory=MetricsSpec)
     sweep: SweepConfig | None = None
     conditions: list[ConditionSpec] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _condition_sweep_ranges(self) -> "ExperimentSpec":
+        for c in self.conditions:
+            lo = c.sweep_rate_lo if c.sweep_rate_lo is not None else (
+                self.sweep.rate_lo if self.sweep else None)
+            hi = c.sweep_rate_hi if c.sweep_rate_hi is not None else (
+                self.sweep.rate_hi if self.sweep else None)
+            if (c.sweep_rate_lo or c.sweep_rate_hi) and self.sweep is None:
+                raise ValueError(f"condition {c.name}: sweep range given but no sweep section")
+            if lo is not None and hi is not None and hi <= lo:
+                raise ValueError(f"condition {c.name}: sweep rate_hi {hi} must exceed rate_lo {lo}")
+        return self
 
     @field_validator("conditions")
     @classmethod

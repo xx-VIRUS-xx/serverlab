@@ -65,3 +65,18 @@ Reason: calibration run 1 showed the p99-onset knee is unreliable on this host (
 4. The secondary p99 knee per sweep is reported next to each, with its spread; it is not graded.
 
 The interval-prediction procedure from the first addendum (rerun calibration once, pool 160, same procedure) still applies; `A` is taken from the rerun, not run 1. Both are reported.
+
+### Week 4 amendment 3: calibration rerun outcome and main-run design (committed before any pool-size data)
+
+Calibration rerun (`results/week4_calibration/20261015T041012Z`, pool 160, 3 interleaved sweeps, same procedure as declared). Host still thrashing: swap 16986 MiB in use (the run's `environment.json` carries the warning).
+- p99-onset knees (secondary, ungraded): 217, 67.5 and "above range" (>975). They confirm the p99 knee is unusable on this host.
+- Utilization-law fit over 16 valid steps: `A` = 1843 req/s, 95% interval **[896, 3510]**, R^2 0.47 (fixed 28.1% CPU, marginal 390 us/request). The estimate is weak and its interval is wide; it is used as declared, not improved.
+- Per the declared rule 4 (estimates differ by more than 1.5x) `A` is the interval [896, 3510]. With the amended pass rule the regimes are:
+  - pool 5, 10, 20, 40 (`C_pool` = 100, 200, 400, 800, all below `A_lo` = 896): **pool-limited, graded**: median saturated plateau within 15% of `C_pool`.
+  - pool 80 (`C_pool` = 1600, inside [896, 3510]): **ambiguous by construction, not graded**.
+
+Main-run design, fixed now:
+- Each pool size gets its own sweep range, `[C_pool/4, 3 x C_pool]` clipped to `[20, 3200]` req/s: pool 5: 25-300, pool 10: 50-600, pool 20: 100-1200, pool 40: 200-2400, pool 80: 400-3200. Reason: in the calibration rerun the pool "saturated" at 320-592 req/s at pool 160 (`C_pool` 3200) because the API itself was overloaded at the top steps (event-loop delay inflates how long a connection is held). The plateau has to be measured just above `C_pool`, not far beyond it.
+- 3 sweeps per pool size, interleaved in the seeded randomized-block order; collectors on (container stats, app metrics, `pg_stat_activity`).
+- Secondary diagnostic, not graded: the plateau restricted to steps whose SUT container CPU median was below 85% (API not overloaded).
+- Stated in advance: if event-loop stalls on this host make the connection hold time longer than 50 ms, `C_meas` falls below `C_pool` and the pass rule can fail. That outcome would be reported as a miss, with the hold-time evidence, not adjusted.

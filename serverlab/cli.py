@@ -223,7 +223,10 @@ def analyze_pool(
             typer.echo(
                 f"        rep {s.repetition}: plateau="
                 f"{'n/a' if s.c_meas is None else round(s.c_meas)} "
-                f"({s.saturated_intervals} saturated intervals) p99-knee (secondary)={knee}"
+                f"({s.saturated_intervals} saturated intervals) "
+                f"plateau@SUT-CPU<85%="
+                f"{'n/a' if s.c_meas_low_cpu is None else round(s.c_meas_low_cpu)} "
+                f"({s.low_cpu_intervals}) p99-knee (secondary)={knee}"
             )
     if any(v.passed is False for v in verdicts):
         raise typer.Exit(EXIT_INVALID_RUN)

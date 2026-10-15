@@ -1,0 +1,65 @@
+# Experiment 1: DB connection pool. Predictions and pass rules: docs/predictions.md (Week 4, amendments 1-3).
+# Little's law: pool capacity C_pool(n) = n / 0.050 s = 100 / 200 / 400 / 800 / 1600 req/s.
+# Dev Mac, not-cross-machine-comparable: same-host relative findings only.
+name: week4_pool
+seed: 20261016
+repetitions: 3
+conditions:
+  - name: pool-5
+    target_env: {POOL_SIZE: "5"}
+    sweep_rate_lo: 25
+    sweep_rate_hi: 300
+  - name: pool-10
+    target_env: {POOL_SIZE: "10"}
+    sweep_rate_lo: 50
+    sweep_rate_hi: 600
+  - name: pool-20
+    target_env: {POOL_SIZE: "20"}
+    sweep_rate_lo: 100
+    sweep_rate_hi: 1200
+  - name: pool-40
+    target_env: {POOL_SIZE: "40"}
+    sweep_rate_lo: 200
+    sweep_rate_hi: 2400
+  - name: pool-80
+    target_env: {POOL_SIZE: "80"}
+    sweep_rate_lo: 400
+    sweep_rate_hi: 3200
+target:
+  image: serverlab-api
+  build_context: .
+  dockerfile: targets/api/Dockerfile
+  env:
+    DATABASE_URL: postgresql://postgres:bench@db:5432/postgres
+    SERVICE_TIME_MS: "50"
+    POOL_TIMEOUT_S: "30"
+  port: 8000
+  publish: 58000
+  services:
+    - name: db
+      image: postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+      env: {POSTGRES_PASSWORD: bench}
+      command: [postgres, -c, max_connections=500]
+      tmpfs: [/var/lib/postgresql/data]
+      healthcheck: [CMD-SHELL, "pg_isready -U postgres"]
+      container_port: 5432
+      publish: 55432
+k6_image: grafana/k6@sha256:e66db15b860113878fa74670e31f5e274830b7b6e42c8bff28b2f2d86a257603
+load:
+  rate: 50
+  duration_s: 10
+  pre_allocated_vus: 400
+  max_vus: 5000
+  url: http://sut:8000/work
+cpus: {sut: [0], load: [3], services: {db: [1, 2]}}
+warmup_s: 2
+cooldown_s: 0
+metrics: {enabled: true, interval_s: 1.0, app_metrics_path: /metrics, pg_service: db}
+sweep:
+  rate_lo: 25
+  rate_hi: 3200
+  step_duration_s: 10
+  step_warmup_s: 2
+  coarse_points: 8
+  max_bisect: 6
+  width_target_pct: 5.0

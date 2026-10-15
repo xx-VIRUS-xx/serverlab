@@ -128,9 +128,10 @@ def run_sweeps(
                 on_step(name, m)
             return m
 
+        cond = next(c for c in spec.conditions if c.name == name)
         sweep = run_sweep(
-            measure, cfg.rate_lo, cfg.rate_hi, seed, cfg.coarse_points, cfg.max_bisect,
-            cfg.width_target_pct,
+            measure, cond.sweep_rate_lo or cfg.rate_lo, cond.sweep_rate_hi or cfg.rate_hi, seed,
+            cfg.coarse_points, cfg.max_bisect, cfg.width_target_pct,
         )
         out.append(ConditionSweep(
             condition=name, repetition=sched.repetition, index=sched.index, seed=seed,

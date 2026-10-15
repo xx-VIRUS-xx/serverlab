@@ -26,6 +26,7 @@ from serverlab.analysis.capacity import (
 SERVICE_S = 0.050
 TOLERANCE = 0.15
 API_CPU_MIN_PCT = 90.0
+LOW_CPU_PCT = 85.0
 
 Regime = Literal["pool-limited", "ambiguous", "api-limited"]
 
@@ -35,6 +36,9 @@ class SweepCapacity(BaseModel):
     c_meas: float | None
     saturated_intervals: int
     p99_knee_estimate: float | None  # secondary, ungraded
+    # secondary, ungraded: plateau over steps where the SUT container CPU median was < 85%
+    c_meas_low_cpu: float | None = None
+    low_cpu_intervals: int = 0
     pool_ever_saturated: bool
     # median SUT CPU over the steps where latency inflated
     saturated_steps_sut_cpu_pct: float | None
@@ -139,6 +143,7 @@ def sweep_capacities(results_dir: Path) -> dict[int, list[SweepCapacity]]:
         cs = json.loads(path.read_text())
         size = _pool_size(spec, cs["condition"])
         sat: list[float] = []
+        low_cpu_lines: list[dict[str, Any]] = []
         ever = False
         sat_cpu: list[float] = []
         sat_rates = {
@@ -148,6 +153,10 @@ def sweep_capacities(results_dir: Path) -> dict[int, list[SweepCapacity]]:
             run_id = rec["result"]["run_id"]
             app = read_jsonl(results_dir / "metrics" / f"{run_id}.app.jsonl")
             sat += saturated_throughputs(app)
+            dk = [d["cpu_percent"] for d in read_jsonl(results_dir / "metrics" / f"{run_id}.jsonl")
+                  if d["container"].endswith("-sut-1") and d.get("cpu_percent") is not None]
+            if dk and statistics.median(dk) < LOW_CPU_PCT:
+                low_cpu_lines += app
             if rec["result"]["valid"] and saturated_throughputs(app):
                 ever = True
             if rec["offered_rate"] in sat_rates:
@@ -164,8 +173,10 @@ def sweep_capacities(results_dir: Path) -> dict[int, list[SweepCapacity]]:
             )
         ]
         c_meas, n_int = pool_capacity(all_app) if all_app else (None, 0)
+        c_low, n_low = pool_capacity(low_cpu_lines) if low_cpu_lines else (None, 0)
         out.setdefault(size, []).append(SweepCapacity(
             repetition=cs["repetition"], c_meas=c_meas, saturated_intervals=n_int,
+            c_meas_low_cpu=c_low, low_cpu_intervals=n_low,
             p99_knee_estimate=cs["sweep"]["knee"].get("estimate"),
             pool_ever_saturated=ever,
             saturated_steps_sut_cpu_pct=statistics.median(sat_cpu) if sat_cpu else None,
