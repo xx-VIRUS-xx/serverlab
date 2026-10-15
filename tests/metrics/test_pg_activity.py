@@ -217,6 +217,9 @@ def test_samples_show_other_connections_wait_events(pg_dsn: str, tmp_path: Path)
         row["wait_event_type"] == "Timeout" and row["wait_event"] == "PgSleep" and row["count"] == 3
         for row in all_rows
     )
-    # The collector's own backend is excluded by pg_backend_pid(). It is the only client backend
-    # that can be active while showing no wait event, because the sleepers are in PgSleep.
-    assert not any(row["state"] == "active" and row["wait_event"] is None for row in all_rows)
+    # The collector's own backend is excluded by pg_backend_pid(): there are exactly 3 sleeper
+    # connections, so no sample may ever show more than 3 client backends in total. (A sleeper
+    # that just started its query can be briefly `active` with no wait event, so the absence of
+    # such a row is not a valid check.)
+    for line in lines:
+        assert sum(row["count"] for row in line["rows"]) <= 3

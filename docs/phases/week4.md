@@ -116,4 +116,4 @@ Secondary, ungraded p99 knees (3 sweeps each): pool 5: 97, 97, 97; pool 10: 193,
 - Pool 40's pass is within tolerance but its hold time is already inflated, so "pool-limited" is the label by the committed rule, not a clean diagnosis (limiting resource is shared).
 - The p99 knee was unreliable in the calibration runs on this host; that it behaved in the main run does not make it reliable in general.
 
-**Checks:** `serverlab validate --offline`, ruff, mypy, pytest: see section 11a.
+**Checks (after the run, host idle):** ruff and mypy clean; `serverlab validate --offline` passes (coverage 0.945 at n=10, 0.937 at n=20); pytest 266 tests including the Docker integration tests: 265 passed on the first run and one timing-dependent assertion in the Postgres-collector test failed (a sleeper that has just started its query is briefly `active` with no wait event). The assertion was replaced by a check of what it meant to prove (the collector's own backend never appears: at most 3 backends in any sample); the test then passed 3 of 3 consecutive runs.
