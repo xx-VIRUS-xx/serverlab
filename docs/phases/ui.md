@@ -1,6 +1,6 @@
 # Phase plan: local UI + SDK + publish
 
-Status: **DRAFT, awaiting human approval. No code yet.**
+Status: **Approved 2026-10-15: public repository, MIT license, other defaults as written. Email is re-confirmed right before the push.**
 Decision D-4 (owner): a simple interface that runs on the user's own machine, then publish the project. This overrides the V1 non-goal "no web dashboard" (plan.md s2); everything else in plan.md stands. Weeks 5-8 (concurrency model, Redis, bottleneck analyzer + HTML report, LLM serving) are **not built** and the README will list them as roadmap, not as features.
 
 ## 1. What the user gets
@@ -54,7 +54,7 @@ No editing of results; no accounts; no network calls.
 
 ## 6. Publishing: I need your answers before U-5
 `gh` is logged in as `xx-VIRUS-xx`; there is no git remote yet. Pushing is outward-facing, so I will not do it until you confirm:
-1. **Repository name and visibility.** Default: `serverlab`, **private** (you can make it public later).
+1. **Repository name and visibility.** Decided: `serverlab`, **public**.
 2. **License.** Default: MIT (only matters if it is public).
 3. **Author email.** Every commit currently carries `<author email>`. For a public repo that address becomes visible. Keep it, or switch to your GitHub noreply address? (Changing it rewrites history, which is fine before the first push.)
 4. **What to push.** Default: `main` only; not the 14 local worker branches or worktrees. I will remove the now-unused tool-specific files (`.agent/`, `.github/copilot-instructions.md`) and keep `collab/` as a record of how it was built.
