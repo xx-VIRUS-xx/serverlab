@@ -84,3 +84,14 @@ def test_input_order_does_not_matter() -> None:
     a = analyse_sweep(steps)
     b = analyse_sweep(list(reversed(steps)))
     assert a == b
+
+
+def test_error_rate_above_one_percent_is_never_good() -> None:
+    fast_fail = StepMeasurement(rate=40, achieved=40.0, p99_ms=100.0, valid=True, error_rate=0.05)
+    res = analyse_sweep([ok(10), ok(20), fast_fail, ok(80, 900, 0.3)])
+    assert (res.lo, res.hi) == (20, 40)  # fast 5xx must not look like completed throughput
+
+
+def test_error_rate_at_the_gate_is_still_good() -> None:
+    edge = StepMeasurement(rate=40, achieved=40.0, p99_ms=100.0, valid=True, error_rate=0.01)
+    assert analyse_sweep([ok(10), ok(20), edge]).status == "above_range"

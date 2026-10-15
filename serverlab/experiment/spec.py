@@ -8,6 +8,30 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from serverlab.load.base import LoadSpec
 
 
+class ServiceSpec(BaseModel):
+    """An extra container on the SUT side (e.g. Postgres). Image must be pinned; CPU set comes
+    from `cpus.services[name]`. The service name is its DNS name on the compose network."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9-]*$")
+    image: str = Field(description="pinned image: name@sha256:... or local id sha256:...")
+    env: dict[str, str] = Field(default_factory=dict)
+    command: list[str] | None = None
+    tmpfs: list[str] = Field(default_factory=list, description="in-memory mounts, clean per run")
+    healthcheck: list[str] | None = Field(
+        default=None, description="compose healthcheck `test`, e.g. ['CMD-SHELL', 'pg_isready']"
+    )
+    container_port: int | None = None
+    publish: int | None = Field(
+        default=None, description="host port (127.0.0.1) mapped to container_port, for collectors"
+    )
+
+    @model_validator(mode="after")
+    def _publish_needs_port(self) -> "ServiceSpec":
+        if self.publish is not None and self.container_port is None:
+            raise ValueError(f"service {self.name}: publish requires container_port")
+        return self
+
+
 class TargetSpec(BaseModel):
     image: str = Field(
         description="pinned image: name@sha256:... or local id sha256:...; "
@@ -20,11 +44,25 @@ class TargetSpec(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     port: int = 8000
     health_path: str = "/healthz"
+    publish: int | None = Field(
+        default=None, description="host port (127.0.0.1) mapped to `port`, for app-metrics scraping"
+    )
+    services: list[ServiceSpec] = Field(default_factory=list)
+
+    @field_validator("services")
+    @classmethod
+    def _unique_service_names(cls, v: list[ServiceSpec]) -> list[ServiceSpec]:
+        names = [s.name for s in v]
+        reserved = {"sut", "k6"} & set(names)
+        if reserved or len(set(names)) != len(names):
+            raise ValueError(f"service names must be unique and not sut/k6: {names}")
+        return v
 
 
 class CpuSpec(BaseModel):
     sut: list[int]
     load: list[int]
+    services: dict[str, list[int]] = Field(default_factory=dict)
 
 
 class RunSpec(BaseModel):
@@ -100,6 +138,16 @@ class ExperimentSpec(BaseModel):
     def collector_enabled(self, condition: str) -> bool:
         cond = next(c for c in self.conditions if c.name == condition)
         return self.metrics.enabled if cond.metrics_enabled is None else cond.metrics_enabled
+
+    @model_validator(mode="after")
+    def _service_cpusets(self) -> "ExperimentSpec":
+        names = {s.name for s in self.target.services}
+        if names != set(self.cpus.services):
+            raise ValueError(
+                f"cpus.services {sorted(self.cpus.services)} must match target.services "
+                f"{sorted(names)}"
+            )
+        return self
 
     @property
     def condition_names(self) -> list[str]:

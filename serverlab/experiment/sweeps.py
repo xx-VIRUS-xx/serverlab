@@ -57,6 +57,7 @@ def measurement_from_record(rec: RunRecord, duration_s: int, load_cpus: int) -> 
         valid=res.valid,
         invalid_reasons=list(res.invalid_reasons),
         k6_cpu_pct=k6_pct,
+        error_rate=min(max(res.error_rate, 0.0), 1.0),
     )
 
 

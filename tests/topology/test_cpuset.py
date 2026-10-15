@@ -58,3 +58,17 @@ def test_assignment_is_frozen() -> None:
     a = assign_cpusets(4, [0], [1])
     with pytest.raises(ValidationError):
         a.total = 8  # type: ignore[misc]
+
+
+def test_extra_service_sets_are_disjoint_and_listed() -> None:
+    a = assign_cpusets(8, [0, 1], [2], extra={"db": [3, 4]})
+    assert a.extra_cpuset("db") == "3,4" and a.unassigned == (5, 6, 7)
+
+
+def test_extra_set_overlap_and_range_rejected() -> None:
+    with pytest.raises(ValueError, match="sut and db cpusets overlap"):
+        assign_cpusets(8, [0, 1], [2], extra={"db": [1, 3]})
+    with pytest.raises(ValueError, match="out of range"):
+        assign_cpusets(4, [0], [1], extra={"db": [4]})
+    with pytest.raises(ValueError, match="must not be empty"):
+        assign_cpusets(4, [0], [1], extra={"db": []})

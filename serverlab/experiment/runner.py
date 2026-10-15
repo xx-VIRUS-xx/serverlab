@@ -176,10 +176,18 @@ def prepare_experiment(
     total = probe_env.docker_vm_cpus or probe_env.cpu_cores
     if total is None:
         raise RunnerError("cannot determine CPU count for cpuset validation")
-    assignment = assign_cpusets(total, spec.cpus.sut, spec.cpus.load)
+    assignment = assign_cpusets(
+        total, spec.cpus.sut, spec.cpus.load, extra=spec.cpus.services
+    )
     env = capture_environment(
-        image_digests={"sut": sut_image, "k6": spec.k6_image},
-        cpu_allocation={"sut": list(assignment.sut), "load": list(assignment.load)},
+        image_digests={
+            "sut": sut_image, "k6": spec.k6_image,
+            **{f"service:{s.name}": s.image for s in spec.target.services},
+        },
+        cpu_allocation={
+            "sut": list(assignment.sut), "load": list(assignment.load),
+            **{f"service:{k}": list(v) for k, v in assignment.extra.items()},
+        },
         experiment_dir=base,
     )
     (result_dir / "environment.json").write_text(env.model_dump_json(indent=2))
@@ -310,7 +318,10 @@ def run_one(
         index=run.index, offered_rate=run_spec.load.rate, seed=spec.seed,
         started_at=started.isoformat(), finished_at=datetime.now(UTC).isoformat(),
         sut_image=sut_image, k6_image=spec.k6_image,
-        cpus={"sut": list(assignment.sut), "load": list(assignment.load)},
+        cpus={
+            "sut": list(assignment.sut), "load": list(assignment.load),
+            **{f"service:{k}": list(v) for k, v in assignment.extra.items()},
+        },
         hdr_stats=hdr_stats, metrics_stats=metrics_stats,
         sut_cpu_usec=sut_cpu_usec, sut_cpu_note=cpu_note,
         comparability=comparability, result=result,

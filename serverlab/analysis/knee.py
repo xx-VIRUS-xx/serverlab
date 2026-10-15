@@ -2,8 +2,10 @@
 
 Definitions (fixed in docs/phases/week3.md s3 before any data):
 
-* A step is **good** if it is `ok`, achieved/offered >= 0.95 and P99 <= 2.0 x the baseline P99
-  (the P99 of the lowest-rate `ok` step).
+* A step is **good** if it is `ok`, achieved/offered >= 0.95, error rate <= 1% and
+  P99 <= 2.0 x the baseline P99 (the P99 of the lowest-rate `ok` step). The error gate was added
+  in Week 4 (docs/phases/week4.md s4) before any Week 4 data: a saturated pool that fails fast
+  must not look like completed throughput.
 * A step is **bad** if it is `saturated`, or `ok` but not good.
 * `invalid-other` steps are excluded from the curve and listed in the result.
 * The knee bracket is [highest good step below the first bad step, first bad step]. The point
@@ -23,6 +25,7 @@ from pydantic import BaseModel, Field
 ACHIEVED_RATIO_MIN = 0.95
 P99_INFLATION_MAX = 2.0
 K6_CPU_MAX_PCT = 80.0
+ERROR_RATE_MAX = 0.01  # Week 4: a step with more errors than this is never good
 SATURATION_MARKERS = ("dropped iterations", "max_vus")  # reason substrings from load/k6.py
 
 Status = Literal["ok", "saturated", "invalid-other"]
@@ -40,6 +43,7 @@ class StepMeasurement(BaseModel):
     k6_cpu_pct: float | None = Field(
         default=None, description="k6 container CPU as % of its cpuset capacity"
     )
+    error_rate: float = Field(default=0.0, ge=0.0, le=1.0, description="share of failed requests")
 
 
 class Step(BaseModel):
@@ -109,7 +113,11 @@ def _is_good(step: Step, base: float) -> bool:
     m = step.measurement
     if step.status != "ok" or m.achieved is None or m.p99_ms is None:
         return False
-    return m.achieved / m.rate >= ACHIEVED_RATIO_MIN and m.p99_ms <= P99_INFLATION_MAX * base
+    return (
+        m.achieved / m.rate >= ACHIEVED_RATIO_MIN
+        and m.error_rate <= ERROR_RATE_MAX
+        and m.p99_ms <= P99_INFLATION_MAX * base
+    )
 
 
 def find_knee(steps: list[Step], baseline_p99_ms: float | None) -> KneeResult:

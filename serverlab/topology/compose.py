@@ -67,10 +67,15 @@ def render_compose(
         raise ValueError(
             f"sut image {sut_image!r} does not match spec.target.image {spec.target.image!r}"
         )
-    if list(assignment.sut) != spec.cpus.sut or list(assignment.load) != spec.cpus.load:
+    if (
+        list(assignment.sut) != spec.cpus.sut
+        or list(assignment.load) != spec.cpus.load
+        or {k: list(v) for k, v in assignment.extra.items()} != spec.cpus.services
+    ):
         raise ValueError(
             f"cpu assignment sut={list(assignment.sut)} load={list(assignment.load)} "
-            f"does not match spec.cpus sut={spec.cpus.sut} load={spec.cpus.load}"
+            f"extra={ {k: list(v) for k, v in assignment.extra.items()} } does not match "
+            f"spec.cpus sut={spec.cpus.sut} load={spec.cpus.load} services={spec.cpus.services}"
         )
 
     sut_service: dict[str, Any] = {
@@ -81,6 +86,34 @@ def render_compose(
         "networks": [NETWORK],
         "healthcheck": _healthcheck(spec.target.port, spec.target.health_path),
     }
+    services: dict[str, Any] = {SUT_SERVICE: sut_service}
+    if spec.target.publish is not None:
+        sut_service["ports"] = [f"127.0.0.1:{spec.target.publish}:{spec.target.port}"]
+    for svc in spec.target.services:
+        _check_digest_ref(svc.name, svc.image)
+        doc: dict[str, Any] = {
+            "image": svc.image,
+            "cpuset": assignment.extra_cpuset(svc.name),
+            "environment": dict(svc.env),
+            "networks": [NETWORK],
+        }
+        if svc.command is not None:
+            doc["command"] = list(svc.command)
+        if svc.tmpfs:
+            doc["tmpfs"] = list(svc.tmpfs)
+        if svc.healthcheck is not None:
+            doc["healthcheck"] = {
+                "test": list(svc.healthcheck), "interval": "1s", "timeout": "3s",
+                "retries": 30, "start_period": "2s",
+            }
+        if svc.publish is not None:
+            doc["ports"] = [f"127.0.0.1:{svc.publish}:{svc.container_port}"]
+        services[svc.name] = doc
+    if spec.target.services:
+        sut_service["depends_on"] = {
+            s.name: {"condition": "service_healthy" if s.healthcheck else "service_started"}
+            for s in spec.target.services
+        }
     k6_service: dict[str, Any] = {
         "image": k6_image,
         "cpuset": assignment.load_cpuset(),
@@ -90,6 +123,6 @@ def render_compose(
     if work_dir is not None:
         k6_service["volumes"] = [f"{work_dir.resolve()}:/work"]
     return {
-        "services": {SUT_SERVICE: sut_service, K6_SERVICE: k6_service},
+        "services": {**services, K6_SERVICE: k6_service},
         "networks": {NETWORK: {"driver": "bridge"}},
     }
